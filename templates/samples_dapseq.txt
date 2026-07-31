@@ -1,0 +1,10 @@
+# ============================================================================
+# samples_dapseq.txt — DAP-seq 样本记录表（模板）
+# ============================================================================
+# DAP-seq 走 nf-core/chipseq（原理相同），故列与 ChIP-seq 一致。
+# 完整格式说明（列名别名、双端配对规则、pair_pattern 指令）见 samples_chipseq.txt。
+# ============================================================================
+sample_id	antibody	control_id	replicate	fastq_path
+# Dof_DAP	crDOF	DAP_input	1	/data/raw/dap/Dof_rep1
+# Dof_DAP	crDOF	DAP_input	2	/data/raw/dap/Dof_rep2
+# DAP_input	-	-	1	/data/raw/dap/input

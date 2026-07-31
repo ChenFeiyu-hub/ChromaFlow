@@ -1,0 +1,12 @@
+# ============================================================================
+# samples_atacseq.txt — ATAC-seq 样本记录表（模板）
+# ============================================================================
+# ATAC-seq 无 antibody / control，可直接省略这两列（表头式的好处）。
+# 完整格式说明（列名别名、双端配对规则、pair_pattern 指令）见 samples_chipseq.txt。
+#
+#   #@ pair_pattern: _clean_{R}.fq.gz     # 需要时才写；默认自动识别
+# ============================================================================
+sample_id	replicate	fastq_path
+# WT_ATAC	1	/data/raw/atac/WT_rep1
+# WT_ATAC	2	/data/raw/atac/WT_rep2
+# WT_ATAC	3	/data/raw/atac/WT_rep3

@@ -1,0 +1,33 @@
+# ============================================================================
+# 本仓库是「软件本体」，只应包含代码。数据/结果属于各项目，不进此库。
+# 以下为兜底：防止误在仓库内 init/运行时把项目产物提交进来。
+# ============================================================================
+
+# 误建的项目产物（若在仓库内运行）
+outputs/
+inputs/
+results/
+logs/
+samplesheets/
+work/
+.nextflow/
+.nextflow.log*
+.singularity_cache/
+.chromaflow/
+.conda_envs/
+.condarc_nfcore
+nf-core-*/
+
+# 用户实例化的配置/样本表（模板在 templates/，实例应在各项目里）
+/chromaflow.config
+/samples_*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 系统 / 编辑器
+.DS_Store
+*.swp
+*~

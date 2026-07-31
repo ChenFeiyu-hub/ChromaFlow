@@ -1,0 +1,40 @@
+# ============================================================================
+# samples_chipseq.txt — ChIP-seq 样本记录表（模板）
+# ============================================================================
+# 三种写法，任选其一（可用 TAB / 逗号 / 空格分隔）：
+#
+#   ① 表头式（推荐）：第一行写列名，列顺序随意、可缺省、可加自定义列
+#        sample_id  antibody  control_id  replicate  fastq_path
+#   ② 位置式（旧格式，仍兼容）：
+#        sample_id  antibody  control_id  replicate  fastq_path
+#      —— 但必须严格按此顺序，且至少 4 列
+#   ③ 直接给文件（跳过自动配对）：
+#        sample_id  replicate  fastq_1  fastq_2
+#
+# 列名别名（不分大小写）：
+#   sample_id  = sample / name
+#   antibody   = ab / target        （ATAC-seq 或 input 样本填 -）
+#   control_id = control / input    （input 样本自身填 -）
+#   replicate  = rep                （每个 sample 从 1 开始）
+#   fastq_path = fastq / path / dir （目录 / 文件前缀 / glob 均可）
+#   fastq_1/2  = r1,r2 / read1,read2
+#
+# ── 双端配对 ──
+# 默认自动识别文件名里最右侧的 R1/R2 记号，无需配置后缀，已覆盖：
+#   _1/_2、_R1/_R2、.1/.2、-1/-2、_R1_001/_R2_001、_good_1/_good_2、
+#   _clean_1/_clean_2、_val_1/_val_2、_1P/_2P、xxxR1/xxxR2 ...
+# 找不到配对文件时按单端处理并给出 WARN。
+# 命名特别怪时可用模板指令强制指定（{R} 处填 1/2）：
+#   #@ pair_pattern: _good_{R}.fq.gz
+# 全部按单端处理：
+#   #@ single_end: true
+# 也可在 chromaflow.config 里设 FASTQ_PAIR_PATTERN / FASTQ_SINGLE_END，
+# 或命令行 chromaflow samplesheet --pair-pattern '_R{R}_001.fastq.gz' --single-end
+#
+# 先看配对结果、不写文件： chromaflow samplesheet --list-fastq
+# ============================================================================
+sample_id	antibody	control_id	replicate	fastq_path
+# Dof_ChIP	crDOF	Input_spx1	1	/data/raw/Dof_rep1
+# Dof_ChIP	crDOF	Input_spx1	2	/data/raw/Dof_rep2
+# Dof_ChIP	crDOF	Input_spx1	3	/data/raw/Dof_rep3
+# Input_spx1	-	-	1	/data/raw/input

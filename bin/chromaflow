@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# ============================================================================
+# chromaflow — unified CLI entry point / 统一命令行入口
+# ============================================================================
+# Code lives in one place ($CHROMAFLOW_HOME); data and results are decided by
+# the project config passed with -c. Run `chromaflow help` for the full list
+# of commands and `chromaflow help <command>` for details.
+#
+#   chromaflow help                 # command overview
+#   chromaflow help samples         # sample record file + read pairing
+#   chromaflow help config          # what belongs in chromaflow.config
+#   chromaflow help envs            # conda env per step
+#
+# Config resolution: -c <file> > $CHROMAFLOW_CONFIG > ./chromaflow.config
+# ============================================================================
+
+set -euo pipefail
+
+# 自动探测代码根目录（无论从哪里调用 / 软链接）
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "${SOURCE}" ]]; do
+    DIR="$(cd -P "$(dirname "${SOURCE}")" && pwd)"
+    SOURCE="$(readlink "${SOURCE}")"
+    [[ "${SOURCE}" != /* ]] && SOURCE="${DIR}/${SOURCE}"
+done
+BIN_DIR="$(cd -P "$(dirname "${SOURCE}")" && pwd)"
+export CHROMAFLOW_HOME="$(cd "${BIN_DIR}/.." && pwd)"
+LIB="${CHROMAFLOW_HOME}/lib"
+STEPS="${LIB}/steps"
+
+# shellcheck disable=SC1091
+source "${LIB}/common.sh"
+
+# shellcheck disable=SC1091
+source "${LIB}/help.sh"
+
+usage() {
+    help_main
+    exit "${1:-0}"
+}
+
+# ---- 参数解析 ----
+CMD="${1:-}"; shift || true
+CONFIG=""; TYPE="chipseq"; WANT_HELP=0; POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--config) CONFIG="$2"; shift 2 ;;
+        -t|--type)   TYPE="$2";   shift 2 ;;
+        -o|--outdir) export CHROMAFLOW_OUTDIR="$2"; shift 2 ;;   # 全局输出目录覆盖(任何模式可用)
+        --peakset)   export CHROMAFLOW_PEAKSET="$2"; shift 2 ;;  # 用哪套 peak: idr[:阈值] | consensus | <路径>
+        --profile)   export CHROMAFLOW_PROFILE="$2"; shift 2 ;;  # nf-core 执行模式: singularity|apptainer|docker|conda|mamba
+        -h|--help)   WANT_HELP=1; shift ;;
+        *)           POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+# `chromaflow <cmd> --help` → 该命令的详细帮助；`chromaflow --help` → 总览
+if [[ ${WANT_HELP} -eq 1 ]]; then
+    if [[ -n "${CMD}" && "${CMD}" != "help" ]]; then help_command "${CMD}"; else help_main; fi
+    exit 0
+fi
+
+# 需要配置的命令：解析并导出 CHROMAFLOW_CONFIG，子进程步骤自行加载
+need_config() {
+    export CHROMAFLOW_CONFIG; CHROMAFLOW_CONFIG="$(resolve_config "${CONFIG}")"
+    [[ -f "${CHROMAFLOW_CONFIG}" ]] || die "配置文件不存在: ${CHROMAFLOW_CONFIG}"
+}
+run_step() { bash "${STEPS}/$1" "${@:2}"; }
+
+case "${CMD}" in
+    init)
+        PROJECT_DIR_ARG="${POSITIONAL[0]:-}"
+        [[ -n "${PROJECT_DIR_ARG}" ]] || die "用法: chromaflow init <project_dir> [--type dapseq]"
+        bash "${STEPS}/init_project.sh" "${PROJECT_DIR_ARG}" "${TYPE}"
+        ;;
+    reference)   need_config; run_step 00_prepare_reference.sh ${POSITIONAL[@]+${POSITIONAL[@]+"${POSITIONAL[@]}"}} ;;
+    normalize-gff) need_config; run_step 00b_normalize_gff.sh ${POSITIONAL[@]+${POSITIONAL[@]+"${POSITIONAL[@]}"}} ;;
+    samplesheet) need_config; run_step 01_make_samplesheet.sh "${TYPE}" ${POSITIONAL[@]+${POSITIONAL[@]+"${POSITIONAL[@]}"}} ;;
+    run)
+        need_config
+        # 执行模式决定走哪条路径：容器(默认) 还是 conda
+        # 优先级: --profile > config 的 NFCORE_PROFILE > singularity
+        _PROFILE="$(CHROMAFLOW_CONFIG="${CHROMAFLOW_CONFIG}" bash -c \
+            'source "'"${LIB}"'/common.sh"; load_config "${CHROMAFLOW_CONFIG}" >/dev/null 2>&1; resolve_nfcore_profile')"
+        case ",${_PROFILE}," in
+            *,conda,*|*,mamba,*) run_step 02_run_nfcore_conda.sh "${TYPE}" ;;
+            *)                   run_step 02_run_nfcore.sh       "${TYPE}" ;;
+        esac
+        ;;
+    idr)         need_config; run_step 03_idr_analysis.sh     "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    motif)       need_config; run_step 04_meme_motif.sh       "${TYPE}" ;;
+    annotate)    need_config; run_step 05_peak_annotation.sh    "${TYPE}" ;;
+    annotate-py) need_config; run_step 05_peak_annotation_py.sh "${TYPE}" ;;
+    candidates)  need_config; run_step 06_integrate.sh          "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    lookup)      need_config; run_step 09_lookup.sh             "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    signal)      need_config; run_step 06_signal_deeptools.sh   "${TYPE}" ;;
+    tracks)      need_config; run_step 07_gene_tracks.sh "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    go-prep)     need_config; run_step 08_go_analysis.sh prep --type "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    go-plot)     need_config; run_step 08_go_analysis.sh plot --type "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    spacing)     need_config; run_step support/motif_spacing_analysis.sh "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    doctor)
+        # doctor 无需强制配置：有则软加载，无则仅检查软件/环境
+        [[ -n "${CONFIG}" ]] && export CHROMAFLOW_CONFIG="${CONFIG}"
+        run_step doctor.sh "${TYPE}"
+        ;;
+    help)
+        if [[ ${#POSITIONAL[@]} -gt 0 ]]; then help_command "${POSITIONAL[0]}"; else help_main; fi
+        ;;
+    version|--version|-V) echo "chromaflow ${CHROMAFLOW_VERSION}"; ;;
+    ""|-h|--help) usage 0 ;;
+    *) log_error "未知命令: ${CMD}"; usage 1 ;;
+esac
