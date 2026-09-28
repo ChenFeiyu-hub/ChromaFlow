@@ -20,7 +20,7 @@ fail <- function(stage, e) {
 say <- function(...) cat(sprintf(...), "\n")
 
 # ── 阶段 1：载库 ──
-say("[1/4] 载入 ChIPseeker 及依赖 ...")
+say("[1/4] Load ChIPseeker and dependencies ...")
 tryCatch({
     suppressMessages({
         library(ChIPseeker)
@@ -31,7 +31,7 @@ tryCatch({
     makeTx <<- if (requireNamespace("txdbmaker", quietly = TRUE))
         txdbmaker::makeTxDbFromGFF else GenomicFeatures::makeTxDbFromGFF
     say("      OK — ChIPseeker %s", as.character(packageVersion("ChIPseeker")))
-}, error = function(e) fail("载库", e))
+}, error = function(e) fail("package loading", e))
 
 # ── 准备输入（无参数则用内置迷你数据）──
 if (gff == "") {
@@ -48,7 +48,7 @@ if (gff == "") {
         "chr1\t.\tmRNA\t8000\t9000\t.\t-\t.\tID=mrna2;Parent=gene2",
         "chr1\t.\texon\t8000\t9000\t.\t-\t.\tID=ex3;Parent=mrna2"
     ), gff)
-    say("      (用内置迷你 GFF3)")
+    say("      (using the bundled tiny GFF3)")
 }
 if (bed == "") {
     bed <- file.path(tmpd, "mini_peaks.bed")
@@ -60,11 +60,11 @@ if (bed == "") {
 }
 
 # ── 阶段 2：从 GFF3 建 TxDb ──（Chlamydomonas 等非模式物种最容易出问题的一步）
-say("[2/4] 从 GFF3 建 TxDb: %s", gff)
+say("[2/4] Build TxDb from GFF3: %s", gff)
 txdb <- tryCatch(
     suppressWarnings(makeTx(gff, format = "gff3")),
-    error = function(e) fail("建 TxDb (makeTxDbFromGFF)", e))
-say("      OK — %d 转录本", length(transcripts(txdb)))
+    error = function(e) fail("Build TxDb (makeTxDbFromGFF)", e))
+say("      OK — %d transcripts", length(transcripts(txdb)))
 
 # ── 阶段 3：annotatePeak ──（会触发 GenomeInfoDb 数据，genomeinfodbdata 坏则在此报错）
 say("[3/4] annotatePeak ...")
@@ -72,16 +72,16 @@ anno <- tryCatch({
     peak <- readPeakFile(bed)
     annotatePeak(peak, TxDb = txdb, tssRegion = c(-1000, 200), verbose = FALSE)
 }, error = function(e) fail("annotatePeak", e))
-say("      OK — 注释 %d 个 peak", length(anno@anno))
+say("      OK — Annotated %d peaks", length(anno@anno))
 
 # ── 阶段 4：出饼图（验证 R 绘图链）──
-say("[4/4] plotAnnoPie 出图 ...")
+say("[4/4] Render plotAnnoPie ...")
 out <- file.path(getwd(), "chipseeker_selftest_pie.png")
 tryCatch({
     png(out, width = 900, height = 700, res = 130)
     plotAnnoPie(anno)
     dev.off()
 }, error = function(e) fail("plotAnnoPie", e))
-say("      OK — 已写出 %s", out)
+say("      OK — Wrote %s", out)
 
-cat("\n[ALL PASS] ChIPseeker 建 TxDb / 注释 / 绘图 全部可用\n")
+cat("\n[ALL PASS] ChIPseeker TxDb construction, annotation and plotting passed\n")

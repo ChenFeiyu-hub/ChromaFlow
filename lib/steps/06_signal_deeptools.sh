@@ -3,7 +3,7 @@
 # 06_signal_deeptools.sh — deepTools 信号可视化
 # ============================================================================
 # 支持: chipseq / atacseq / dapseq
-# 环境: mamba activate ChromaFlow_downstream   (含 deepTools)
+# 环境: conda activate ChromaFlow_downstream   (含 deepTools)
 # 用法: chromaflow signal --type [chipseq|atacseq|dapseq]
 # ----------------------------------------------------------------------------
 # 补 nf-core 之不足：以「本 TF 的 peak summit」为中心的结合强度热图，
@@ -14,7 +14,7 @@
 #   replicate_correlation.png / pca.png       重复一致性（≥2 个 bigWig 时）
 # ============================================================================
 set -euo pipefail
-source "${CHROMAFLOW_HOME:?请通过 chromaflow CLI 运行，或先 export CHROMAFLOW_HOME}/lib/common.sh"
+source "${CHROMAFLOW_HOME:?Run through the chromaflow CLI, or export CHROMAFLOW_HOME first}/lib/common.sh"
 load_config "${CHROMAFLOW_CONFIG:-}"
 init_dirs
 
@@ -23,13 +23,14 @@ init_pipeline_dirs "${PIPELINE}"
 open_log "06_signal_deeptools" "${PIPELINE}"
 log_section "Step 06: deepTools Signal Visualization (${PIPELINE})"
 
-SIGNAL_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/signal")"
-ANNO_OUT="${RESULTS_DIR}/downstream/${PIPELINE}/annotation"
+resolve_peakset "${PIPELINE}" "${CHROMAFLOW_PEAKSET:-idr}"
+SIGNAL_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/signal${PEAKSET_SUFFIX}")"
+ANNO_OUT="${RESULTS_DIR}/downstream/${PIPELINE}/annotation${PEAKSET_SUFFIX}"
 mkdir -p "${SIGNAL_OUT}"
 
 # ─────────────── 工具检查 ───────────────
 for tool in computeMatrix plotHeatmap plotProfile; do
-    check_tool "${tool}" || { echo "  请: mamba activate ChromaFlow_downstream"; exit 1; }
+    check_tool "${tool}" || { echo "  Run: conda activate ChromaFlow_downstream"; exit 1; }
 done
 
 # ─────────────── 定位 bigWig ───────────────
@@ -39,20 +40,14 @@ if [[ ${#BIGWIGS[@]} -eq 0 ]]; then
     # 兜底：在 pipeline 结果里递归找
     mapfile -t BIGWIGS < <(find "${RESULTS_DIR}/${PIPELINE}" \( -name "*.bigWig" -o -name "*.bw" \) 2>/dev/null | sort)
 fi
-[[ ${#BIGWIGS[@]} -gt 0 ]] || die "未找到 bigWig（预期在 ${BW_DIR}）。请确认 nf-core 主流程已完成。"
+[[ ${#BIGWIGS[@]} -gt 0 ]] || die "No bigWig found (expected ${BW_DIR}); confirm that nf-core completed."
 
 LABELS=(); for bw in "${BIGWIGS[@]}"; do LABELS+=("$(basename "${bw}" | sed 's/\.\(bigWig\|bw\)$//')"); done
-echo "  找到 ${#BIGWIGS[@]} 个 bigWig:"; printf "    %s\n" "${LABELS[@]}"; echo ""
+echo "  Found ${#BIGWIGS[@]} bigWig files:"; printf "    %s\n" "${LABELS[@]}"; echo ""
 
 # ─────────────── 选择 peaks ───────────────
-REC_PEAKS="${RESULTS_DIR}/downstream/${PIPELINE}/idr/recommended_peaks.bed"
-if [[ -s "${REC_PEAKS}" ]]; then
-    PEAK_BED="${REC_PEAKS}"; PEAK_SOURCE="recommended"
-else
-    CONSENSUS=$(get_consensus_peaks "${PIPELINE}")
-    [[ -f "${CONSENSUS}" ]] || die "未找到 peak 文件"
-    PEAK_BED="${CONSENSUS}"; PEAK_SOURCE="consensus"
-fi
+PEAK_BED="${PEAKSET_FILE}"; PEAK_SOURCE="${CHROMAFLOW_PEAKSET:-idr}"
+[[ -s "${PEAK_BED}" ]] || die "Peak set is missing or empty: ${PEAK_BED}"
 # 标准化为 BED（computeMatrix 需要）
 PEAK_BED_STD="${SIGNAL_OUT}/peaks.bed"
 awk 'BEGIN{OFS="\t"}{print $1,$2,$3,(NF>=4?$4:"peak_"NR)}' "${PEAK_BED}" | sort -k1,1 -k2,2n > "${PEAK_BED_STD}"
@@ -62,7 +57,9 @@ echo "  Peaks: $(wc -l < "${PEAK_BED_STD}") (${PEAK_SOURCE})"
 GENES_BED6="${SIGNAL_OUT}/genes.bed6"
 if [[ -s "${ANNO_OUT}/genes.bed" ]]; then
     # 复用 step 05 产物: chr,start,end,gid,0,strand,name → BED6
-    awk 'BEGIN{OFS="\t"}{print $1,$2,$3,$4,0,$6}' "${ANNO_OUT}/genes.bed" > "${GENES_BED6}"
+    # %d 强制定点输出：兼容旧版 05 可能写出的 "8e+06" 科学计数坐标
+    awk 'BEGIN{OFS="\t"} NF>=6 {printf "%s\t%d\t%d\t%s\t0\t%s\n", $1,$2,$3,$4,$6}' \
+        "${ANNO_OUT}/genes.bed" > "${GENES_BED6}"
 elif [[ -f "${GENOME_GTF}" ]]; then
     GF="gene"; grep -qP '\tgene\t' "${GENOME_GTF}" || GF="transcript"
     python3 - "${GENOME_GTF}" "${GF}" "${GENES_BED6}" <<'PYEOF'
@@ -83,12 +80,12 @@ with open(out,"w") as w:
         w.write(f'{d["c"]}\t{d["s"]}\t{d["e"]}\t{gid}\t0\t{d["d"]}\n')
 PYEOF
 else
-    log_warn "无基因 BED，跳过 TSS metaprofile"
+    log_warn "No gene BED available; skipping TSS metaprofile"
 fi
 echo ""
 
 # ─────────────── A. peak summit 中心热图 ───────────────
-echo "[A] peak summit ±${SIGNAL_PEAK_WIN}bp 结合强度热图"
+echo "[A] Peak midpoint +/-${SIGNAL_PEAK_WIN} bp signal heatmap"
 MAT_PEAK="${SIGNAL_OUT}/matrix_peaks.gz"
 computeMatrix reference-point \
     --referencePoint center \
@@ -99,14 +96,14 @@ computeMatrix reference-point \
     --binSize "${DEEPT_BIN_SIZE}" \
     --skipZeros --missingDataAsZero \
     -p "${THREADS}" \
-    -o "${MAT_PEAK}" 2>&1 | tail -2
+    -o "${MAT_PEAK}"
 
-plotHeatmap -m "${MAT_PEAK}" -o "${SIGNAL_OUT}/peak_summit_heatmap.png" \
-    --refPointLabel summit --colorMap Blues \
-    --heatmapHeight 12 --whatToShow 'heatmap and colorbar' 2>/dev/null
-plotProfile -m "${MAT_PEAK}" -o "${SIGNAL_OUT}/peak_summit_profile.png" \
-    --refPointLabel summit --perGroup 2>/dev/null
-echo "  → peak_summit_heatmap.png, peak_summit_profile.png"
+plotHeatmap -m "${MAT_PEAK}" -o "${SIGNAL_OUT}/peak_midpoint_heatmap.png" \
+    --refPointLabel 'Peak midpoint' --colorMap Blues \
+    --heatmapHeight 12 --whatToShow 'heatmap and colorbar'
+plotProfile -m "${MAT_PEAK}" -o "${SIGNAL_OUT}/peak_midpoint_profile.png" \
+    --refPointLabel 'Peak midpoint' --perGroup
+echo "  → peak_midpoint_heatmap.png, peak_midpoint_profile.png"
 echo ""
 
 # ─────────────── B. TSS metaprofile ───────────────
@@ -122,43 +119,43 @@ if [[ -s "${GENES_BED6}" ]]; then
         --binSize "${DEEPT_BIN_SIZE}" \
         --skipZeros --missingDataAsZero \
         -p "${THREADS}" \
-        -o "${MAT_TSS}" 2>&1 | tail -2
+        -o "${MAT_TSS}"
     plotProfile -m "${MAT_TSS}" -o "${SIGNAL_OUT}/tss_metaprofile.png" \
-        --refPointLabel TSS --perGroup 2>/dev/null
+        --refPointLabel TSS --perGroup
     plotHeatmap -m "${MAT_TSS}" -o "${SIGNAL_OUT}/tss_heatmap.png" \
         --refPointLabel TSS --colorMap Blues \
-        --heatmapHeight 12 --whatToShow 'heatmap and colorbar' 2>/dev/null
+        --heatmapHeight 12 --whatToShow 'heatmap and colorbar'
     echo "  → tss_metaprofile.png, tss_heatmap.png"
     echo ""
 fi
 
 # ─────────────── C. 重复相关性（≥2 bigWig）───────────────
-if [[ ${#BIGWIGS[@]} -ge 2 ]] && check_tool multiBigwigSummary 2>/dev/null; then
-    echo "[C] 重复一致性（Spearman 相关 + PCA）"
+if [[ ${#BIGWIGS[@]} -ge 2 ]]; then
+    for tool in multiBigwigSummary plotCorrelation plotPCA; do check_tool "$tool" || exit 1; done
+    echo "[C] Replicate concordance (Spearman correlation + PCA)"
     SUMMARY="${SIGNAL_OUT}/bigwig_summary.npz"
     multiBigwigSummary bins -b "${BIGWIGS[@]}" --labels "${LABELS[@]}" \
-        --binSize 1000 -p "${THREADS}" -o "${SUMMARY}" 2>&1 | tail -1
+        --binSize 1000 -p "${THREADS}" -o "${SUMMARY}"
     plotCorrelation -in "${SUMMARY}" \
         --corMethod spearman --whatToPlot heatmap --skipZeros \
         --plotNumbers --colorMap RdBu \
-        -o "${SIGNAL_OUT}/replicate_correlation.png" 2>/dev/null || true
-    check_tool plotPCA 2>/dev/null && plotPCA -in "${SUMMARY}" \
-        -o "${SIGNAL_OUT}/pca.png" 2>/dev/null || true
+        -o "${SIGNAL_OUT}/replicate_correlation.png"
+    plotPCA -in "${SUMMARY}" -o "${SIGNAL_OUT}/pca.png"
     echo "  → replicate_correlation.png, pca.png"
     echo ""
 fi
 
 # ─────────────── 总结 ───────────────
 echo "============================================"
-echo " 信号可视化总结 (${PIPELINE})"
+echo " Signal visualization summary (${PIPELINE})"
 echo "============================================"
-echo "  bigWig 数:  ${#BIGWIGS[@]}"
+echo "  bigWig count:  ${#BIGWIGS[@]}"
 echo "  Peaks:      $(wc -l < "${PEAK_BED_STD}") (${PEAK_SOURCE})"
-echo "  输出目录:   ${SIGNAL_OUT}"
+echo "  Output directory:   ${SIGNAL_OUT}"
 echo ""
-echo "  判读提示（DAP-seq）:"
-echo "    · peak_summit_heatmap: 信号应集中在中心 → 结合特异性好"
-echo "    · tss_metaprofile:     若 TF 偏好近端启动子，TSS 附近应见富集峰"
-echo "    · replicate_correlation: 重复间 Spearman 应较高（如 >0.8）"
+echo "  Interpretation notes:"
+echo "    · peak_midpoint_heatmap: Inspect whether signal is concentrated near peak centers"
+echo "    · tss_metaprofile:     Proximal-promoter binding may produce enrichment near TSS"
+echo "    · replicate_correlation: Inspect replicate correlation alongside other QC metrics"
 echo ""
 echo "[DONE] $(date)"

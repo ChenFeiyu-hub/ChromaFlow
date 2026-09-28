@@ -11,19 +11,20 @@
 # ----------------------------------------------------------------------------
 # 美术相关参数集中在本文件顶部的 STYLE 段，改这里即可统一调整外观。
 # ============================================================================
-set -uo pipefail
-source "${CHROMAFLOW_HOME:?需 CHROMAFLOW_HOME}/lib/common.sh"
+set -euo pipefail
+source "${CHROMAFLOW_HOME:?CHROMAFLOW_HOME is required}/lib/common.sh"
 
 # ─────────────── STYLE（美术：改这里，不动逻辑）───────────────
 STYLE_BW_COLORS=("#08519c" "#3182bd" "#6baed6" "#9ecae1" "#c6dbef")
 STYLE_BW_HEIGHT=2
 STYLE_BW_BINS=500
 STYLE_PEAK_COLOR="#e6550d"
-STYLE_PEAK_HEIGHT=0.6
+STYLE_PEAK_HEIGHT=1.1
 STYLE_GENE_COLOR="#333333"
 STYLE_GENE_HEIGHT=2
 STYLE_FONTSIZE=10
 STYLE_DPI=200
+STYLE_LABEL_FRACTION=0.22
 # 差值(log2 ChIP/Input)轨道：常驻，独立 y 轴，正=富集(红)/负=低于背景(蓝)
 STYLE_RATIO_COLOR="#d73027"
 STYLE_RATIO_NEG_COLOR="#4575b4"
@@ -35,6 +36,7 @@ STYLE_INPUT_REGEX="input|control|igg|mock"   # 用于从 bigWig 里识别对照(
 # ─────────────── 解析参数 ───────────────
 GENE_LIST=""; GENES_BED=""; GTF=""; BW_DIR=""; OUT=""; PEAKS=""
 FLANK=3000; YMAX=""; TITLE_SUFFIX=""
+MOTIF_BED=""; SCAN_WINDOWS=""; PROMOTER_BED=""; CHROM_SIZES=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --gene-list)    GENE_LIST="$2"; shift 2 ;;
@@ -46,20 +48,25 @@ while [[ $# -gt 0 ]]; do
         --flank)        FLANK="$2"; shift 2 ;;
         --ymax)         YMAX="$2"; shift 2 ;;
         --title-suffix) TITLE_SUFFIX="$2"; shift 2 ;;
+        --motif-bed)    MOTIF_BED="$2"; shift 2 ;;
+        --scan-windows) SCAN_WINDOWS="$2"; shift 2 ;;
+        --promoter-bed) PROMOTER_BED="$2"; shift 2 ;;
+        --chrom-sizes)  CHROM_SIZES="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
 
-[[ -s "${GENE_LIST}" ]] || die "plot_tracks: 缺 --gene-list 或为空"
-[[ -s "${GENES_BED}" ]] || die "plot_tracks: 缺 --genes-bed（基因坐标）"
-[[ -f "${GTF}" ]]       || die "plot_tracks: 缺 --gtf"
-[[ -n "${OUT}" ]]       || die "plot_tracks: 缺 --outdir"
+[[ -s "${GENE_LIST}" ]] || die "plot_tracks: --gene-list is missing or empty"
+[[ -s "${GENES_BED}" ]] || die "plot_tracks: --genes-bed is required"
+[[ -f "${GTF}" ]]       || die "plot_tracks: --gtf is required"
+[[ -n "${OUT}" ]]       || die "plot_tracks: --outdir is required"
+[[ "${FLANK}" =~ ^[0-9]+$ ]] || die '--flank must be a nonnegative integer'
 mkdir -p "${OUT}"
-check_tool pyGenomeTracks || { echo "  需 pyGenomeTracks（mamba activate ChromaFlow_downstream）"; exit 1; }
+check_tool pyGenomeTracks || { echo "  Requires pyGenomeTracks (activate ChromaFlow_downstream)"; exit 1; }
 
 # ─────────────── bigWig ───────────────
 mapfile -t BIGWIGS < <(find "${BW_DIR}" -maxdepth 1 \( -name "*.bigWig" -o -name "*.bw" \) 2>/dev/null | sort)
-[[ ${#BIGWIGS[@]} -gt 0 ]] || die "plot_tracks: ${BW_DIR} 下无 bigWig"
+[[ ${#BIGWIGS[@]} -gt 0 ]] || die "plot_tracks: no bigWig files under ${BW_DIR}"
 LABELS=(); for bw in "${BIGWIGS[@]}"; do LABELS+=("$(basename "${bw}" | sed 's/\.\(bigWig\|bw\)$//')"); done
 
 # 区分 ChIP 与 Input（按文件名）：用于差值图
@@ -79,21 +86,22 @@ if [[ ${#CHIP_BW[@]} -gt 0 && ${#INPUT_BW[@]} -gt 0 ]] && command -v bigwigCompa
     if [[ ${#CHIP_BW[@]} -eq 1 ]]; then
         CHIP_MEAN="${CHIP_BW[0]}"
     elif command -v bigwigAverage &>/dev/null; then
-        bigwigAverage -b "${CHIP_BW[@]}" --binSize "${STYLE_RATIO_BINSIZE}" -o "${CHIP_MEAN}" >/dev/null 2>&1 \
-            || CHIP_MEAN="${CHIP_BW[0]}"
+        bigwigAverage -b "${CHIP_BW[@]}" --binSize "${STYLE_RATIO_BINSIZE}" -o "${CHIP_MEAN}" \
+            || { log_warn 'bigwigAverage failed; ratio track uses the first ChIP bigWig'; CHIP_MEAN="${CHIP_BW[0]}"; }
     else
+        log_warn 'bigwigAverage unavailable; ratio track uses the first ChIP bigWig'
         CHIP_MEAN="${CHIP_BW[0]}"   # 无 bigwigAverage 时退用第一个 ChIP
     fi
     RATIO_BW="${RDIR}/log2ratio.bw"
     if ! bigwigCompare -b1 "${CHIP_MEAN}" -b2 "${INPUT_BW[0]}" \
             --operation log2 --pseudocount "${STYLE_RATIO_PSEUDOCOUNT}" \
-            --binSize "${STYLE_RATIO_BINSIZE}" -o "${RATIO_BW}" >/dev/null 2>&1; then
-        RATIO_BW=""; echo "  ⚠ 差值轨道生成失败，仅画覆盖轨道"
+            --binSize "${STYLE_RATIO_BINSIZE}" -o "${RATIO_BW}"; then
+        RATIO_BW=""; echo "  ⚠ Ratio-track generation failed; plotting coverage tracks only"
     else
-        echo "  差值轨道: log2(ChIP合并/Input) 已生成"
+        echo "  Ratio track generated: log2(ChIP/Input); ChIP=${CHIP_MEAN}; Input=${INPUT_BW[0]}; pseudocount=${STYLE_RATIO_PSEUDOCOUNT}"
     fi
 elif [[ ${#INPUT_BW[@]} -eq 0 ]]; then
-    echo "  （未识别到 Input bigWig，跳过差值轨道；对照名需含 ${STYLE_INPUT_REGEX}）"
+    echo "  (No Input bigWig found; skipping ratio track. Control names must match ${STYLE_INPUT_REGEX}.)"
 fi
 
 # ─────────────── peaks 标准化（把 signalValue 富集值写进标签，量化"高于背景"）───────────────
@@ -103,7 +111,7 @@ if [[ -s "${PEAKS}" ]]; then
     # 让图上直接看到定量富集，而不是只靠波峰形状（形状受各图 y 轴自适应影响会误导）。
     awk 'BEGIN{OFS="\t"}{
         nm=(NF>=4?$4:"peak_"NR);
-        if(NF>=5 && ($5+0)>0) nm=nm" (sig="sprintf("%.0f",$5)")";
+        if(NF>=5 && ($5+0)>0) nm=nm" (sig="sprintf("%.3g",$5)")";
         print $1,$2,$3,nm }' "${PEAKS}" | sort -k1,1 -k2,2n > "${PEAKS_STD}"
 else
     : > "${PEAKS_STD}"
@@ -116,9 +124,13 @@ import sys, pyBigWig
 genes_bed, glist, flank = sys.argv[1], sys.argv[2], int(sys.argv[3])
 bws = sys.argv[4:]
 coords={}
+# int(float(..)) 兼容旧版 05 写出的科学计数坐标（如 "8e+06"）
 for line in open(genes_bed):
-    c=line.rstrip("\n").split("\t"); coords[c[3]]=(c[0],int(c[1]),int(c[2]))
-    if len(c)>=7: coords[c[6]]=(c[0],int(c[1]),int(c[2]))
+    c=line.rstrip("\n").split("\t")
+    if len(c)<4: continue
+    try: st,en=int(float(c[1])),int(float(c[2]))
+    except ValueError: continue
+    coords[c[3]]=(c[0],st,en)
 regions=[]
 for g in open(glist):
     g=g.strip()
@@ -140,7 +152,7 @@ PYEOF
 )
     [[ "${YMAX}" == "0" ]] && YMAX=""
 fi
-[[ -n "${YMAX}" ]] && echo "  统一 y 上限: ${YMAX}" || echo "  y 上限: 自动(每图自适应)"
+[[ -n "${YMAX}" ]] && echo "  Shared y-axis maximum: ${YMAX}" || echo "  y-axis maximum: automatic per plot"
 
 # 差值轨道的独立 y 范围（基于区域数据，与覆盖轨道 0–6 量纲分开，避免误读）
 RATIO_MIN=""; RATIO_MAX=""
@@ -149,9 +161,13 @@ if [[ -n "${RATIO_BW}" ]] && python3 -c "import pyBigWig" 2>/dev/null; then
 import sys, pyBigWig
 genes_bed, glist, flank, rbw = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 coords={}
+# int(float(..)) 兼容旧版 05 写出的科学计数坐标（如 "8e+06"）
 for line in open(genes_bed):
-    c=line.rstrip("\n").split("\t"); coords[c[3]]=(c[0],int(c[1]),int(c[2]))
-    if len(c)>=7: coords[c[6]]=(c[0],int(c[1]),int(c[2]))
+    c=line.rstrip("\n").split("\t")
+    if len(c)<4: continue
+    try: st,en=int(float(c[1])),int(float(c[2]))
+    except ValueError: continue
+    coords[c[3]]=(c[0],st,en)
 regions=[]
 for g in open(glist):
     g=g.strip()
@@ -172,7 +188,7 @@ hi=math.ceil(hi+0.5); lo=math.floor(min(lo,-0.5))
 print(lo, hi)
 PYEOF
 )
-    echo "  差值轨道 y 范围: ${RATIO_MIN} ~ ${RATIO_MAX}"
+    echo "  Ratio-track y-axis range: ${RATIO_MIN} ~ ${RATIO_MAX}"
 fi
 
 # ─────────────── 生成 tracks.ini ───────────────
@@ -215,13 +231,39 @@ INI="${OUT}/tracks.ini"
         echo "title = peaks"
         echo "color = ${STYLE_PEAK_COLOR}"
         echo "height = ${STYLE_PEAK_HEIGHT}"
-        echo "display = interleaved"
+        echo "display = stacked"
         echo "labels = true"
+        echo "all_labels_inside = true"
         echo "fontsize = ${STYLE_FONTSIZE}"
         echo "file_type = bed"
         echo ""
     fi
     echo "[spacer]"; echo "height = 0.3"; echo ""
+    if [[ -s "${PROMOTER_BED}" ]]; then
+        echo '[query_promoters]'
+        echo "file = ${PROMOTER_BED}"
+        echo 'title = Query promoters'
+        echo 'file_type = bed'; echo 'height = 0.8'; echo 'color = #238B8E'
+        echo 'all_labels_inside = true'
+        echo 'labels = true'; echo 'display = stacked'; echo 'fontsize = 8'; echo ''
+    fi
+    if [[ -s "${SCAN_WINDOWS}" ]]; then
+        echo '[motif_scanned_windows]'
+        echo "file = ${SCAN_WINDOWS}"
+        echo 'title = Motif input windows'
+        echo 'file_type = bed'; echo 'height = 0.7'; echo 'color = #BDBDBD'
+        echo 'labels = false'; echo 'display = collapsed'; echo ''
+    fi
+    if [[ -s "${MOTIF_BED}" ]]; then
+        echo '[motif_hits]'
+        echo "file = ${MOTIF_BED}"
+        echo 'title = FIMO motif hits'
+        echo 'file_type = bed'; echo 'height = 1.2'; echo 'color = #756BB1'
+        echo 'all_labels_inside = true'
+        echo 'labels = true'; echo 'display = stacked'; echo 'fontsize = 7'; echo ''
+    elif [[ -n "${MOTIF_BED}" ]]; then
+        log_warn 'No passing FIMO hits; motif-hit track omitted.'
+    fi
     echo "[genes]"
     echo "file = ${GTF}"
     echo "title = genes"
@@ -230,6 +272,7 @@ INI="${OUT}/tracks.ini"
     echo "height = ${STYLE_GENE_HEIGHT}"
     echo "color = ${STYLE_GENE_COLOR}"
     echo "file_type = gtf"
+    echo "all_labels_inside = true"
     echo "fontsize = ${STYLE_FONTSIZE}"
     echo ""
     echo "[x-axis]"
@@ -237,32 +280,49 @@ INI="${OUT}/tracks.ini"
 } > "${INI}"
 
 # ─────────────── 逐基因渲染 ───────────────
-echo "[渲染]"
-declare -A COORD
+python3 "${CHROMAFLOW_HOME}/lib/steps/support/track_layout.py" \
+    "${INI}" "${GTF}" "${GENES_BED}" "${GENE_LIST}" "${FLANK}" \
+    "${MOTIF_BED}" "${PROMOTER_BED}" "${OUT}"
+echo "[RENDER]"
+declare -A COORD CHRLEN
+if [[ -s "${CHROM_SIZES}" ]]; then
+    while IFS=$'\t' read -r ch length rest; do CHRLEN["$ch"]="$length"; done < "${CHROM_SIZES}"
+fi
 while IFS=$'\t' read -r ch s e gid sc st nm; do
-    COORD["${gid}"]="${ch}:${s}:${e}:${st}"
-    [[ -n "${nm}" ]] && COORD["${nm}"]="${ch}:${s}:${e}:${st}"
+    COORD["${gid}"]="${ch}"$'\t'"${s}"$'\t'"${e}"$'\t'"${st}"
 done < "${GENES_BED}"
 
-N=$(grep -cvE '^\s*$' "${GENE_LIST}"); ok_n=0
+N=$(grep -cvE '^\s*$' "${GENE_LIST}"); ok_n=0; failed_n=0
+STATUS_TSV="${OUT}/plot_status.tsv"
+printf 'gene_id\tstatus\tregion\toutput\n' > "${STATUS_TSV}"
 while read -r g; do
     [[ -z "${g}" ]] && continue
     info="${COORD[${g}]:-}"
-    if [[ -z "${info}" ]]; then echo "  [跳过] 找不到坐标: ${g}"; continue; fi
-    IFS=':' read -r ch s e st <<< "${info}"
+    if [[ -z "${info}" ]]; then
+        echo "  [SKIP] Coordinates not found: ${g}"
+        printf '%s\tmissing_coordinates\t\t\n' "${g}" >> "${STATUS_TSV}"
+        continue
+    fi
+    IFS=$'\t' read -r ch s e st <<< "${info}"
     rs=$(( s - FLANK )); [[ ${rs} -lt 0 ]] && rs=0
     re=$(( e + FLANK ))
+    if [[ -n "${CHRLEN[${ch}]:-}" ]] && (( re > CHRLEN[${ch}] )); then re="${CHRLEN[${ch}]}"; fi
     region="${ch}:${rs}-${re}"
     out="${OUT}/${g}.png"
-    if pyGenomeTracks --tracks "${INI}" --region "${region}" \
+    if pyGenomeTracks --tracks "${OUT}/.layout/${g}.ini" --region "${region}" \
         --title "${g} (${region}, ${st})${TITLE_SUFFIX}" --dpi "${STYLE_DPI}" \
-        -o "${out}" >/dev/null 2>&1; then
+        --fontSize "${STYLE_FONTSIZE}" --trackLabelFraction "${STYLE_LABEL_FRACTION}" \
+        -o "${out}"; then
         echo "  [OK] ${g}  ${region}  → $(basename "${out}")"
         ok_n=$((ok_n+1))
+        printf '%s\tplotted\t%s\t%s\n' "${g}" "${region}" "${out}" >> "${STATUS_TSV}"
     else
         echo "  [FAIL] ${g}  ${region}"
+        failed_n=$((failed_n+1))
+        printf '%s\trender_failed\t%s\t%s\n' "${g}" "${region}" "${out}" >> "${STATUS_TSV}"
     fi
 done < "${GENE_LIST}"
 
-echo "  成功: ${ok_n}/${N}   输出: ${OUT}"
-echo "  ini:  ${INI}  (改 STYLE 段或此文件可调美术)"
+echo "  Succeeded: ${ok_n}/${N}   Output: ${OUT}"
+echo "  ini:  ${INI}  (Edit the STYLE section or this file to change appearance)"
+[[ "${failed_n}" -eq 0 && "${ok_n}" -gt 0 ]] || die 'Track rendering failed or no requested gene could be plotted.'

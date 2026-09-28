@@ -1,106 +1,99 @@
-# ChromaFlow 架构
+# ChromaFlow 1.2.7 架构
 
-## 核心：解耦「软件 / 配置 / 运行」三层
+## 软件、项目配置与分析数据分开
 
-| 层 | 内容 | 位置 | 谁修改 | 进 git 吗 |
-|---|---|---|---|---|
-| ① 软件本体 | CLI、lib、steps、templates | 这个仓库（clone 一次，加进 PATH） | 开发者 | **是**（就是本仓库） |
-| ② 项目配置 | 物种参数、输入/输出路径 | 每个数据集一份 `chromaflow.config` | 用户 | 否（在你的数据目录里） |
-| ③ 运行 I/O | fastq、参考、结果、日志、work | 由配置里的 `INPUT_DIR`/`OUTPUT_DIR` 决定 | 自动 | 否 |
+| 层 | 内容 | 位置 |
+|---|---|---|
+| 软件 | CLI、步骤代码、模板、文档、测试 | 本仓库，可安装为共享只读目录 |
+| 项目配置 | 物种输入、资源上限、分析参数 | 每个项目自己的 `chromaflow.config` |
+| 分析数据 | FASTQ、参考文件、结果、work、缓存、日志 | 项目 INPUT_DIR / OUTPUT_DIR / REFERENCE_DIR |
+| 离线软件包 | 固定版本 nf-core、Nextflow、插件和容器 | 独立 bundle，可共享在 `/opt/chromaflow/bundles/` |
 
-旧版把三层塞进同一个 `PROJECT_DIR`，于是 `results/ logs/ work/` 长在代码仓库里，换数据集要改源码。
-v2 让**代码目录永远只读、零生成物**：所有产物落在项目的 `OUTPUT_DIR` 下。
+配置发现顺序：`-c FILE` > `$CHROMAFLOW_CONFIG` > 当前目录 `chromaflow.config`。
+物种前缀用于文件命名；不会据此截断、转换或猜测基因 ID。
+安装、离线部署和分析命令见 [README](README.zh-CN.md)。
 
-## GitHub main 目录（= 软件本体，只放代码）
+## 代码入口
 
-```
-ChromaFlow/                          # 仓库根 = 软件，不含任何具体数据/结果
-├── README.md                        # 英文主文档
-├── README.zh-CN.md                  # 中文文档
-├── ARCHITECTURE.md
-├── .gitignore                       # 兜底忽略误建的项目产物
-├── setup_environments.sh            # conda/mamba 环境安装
-├── bin/
-│   └── chromaflow                   # 唯一命令行入口（自动探测 CHROMAFLOW_HOME）
-├── lib/
-│   ├── common.sh                    # 配置解析 + 路径派生/自动识别 + 日志（架构核心）
-│   ├── help.sh                      # chromaflow help [command] 的帮助文本
-│   └── steps/
-│       ├── init_project.sh          # chromaflow init 的实现
-│       ├── 00_prepare_reference.sh
-│       ├── 00b_normalize_gff.sh
-│       ├── normalize_gff.py         # 无 AGAT 时的内置 GFF 规范化器
-│       ├── 01_make_samplesheet.sh
-│       ├── make_samplesheet.py
-│       ├── 02_run_nfcore.sh
-│       ├── 02_run_nfcore_conda.sh
-│       ├── 03_idr_analysis.sh
-│       ├── 04_meme_motif.sh
-│       ├── 05_peak_annotation.sh
-│       ├── 06_signal_deeptools.sh
-│       └── support/
-│           └── motif_spacing_analysis.sh
-├── templates/                       # 项目模板：init 时拷贝到用户数据目录
-│   ├── chromaflow.config
-│   ├── samples_chipseq.txt
-│   ├── samples_atacseq.txt
-│   └── samples_dapseq.txt
-└── conf/
-    └── nextflow.config              # Nextflow 通用配置（不硬编码 profile）
+```text
+bin/chromaflow                      CLI、命令路由、统一下游日志
+lib/common.sh                      配置读取、路径派生、输入发现、peakset 解析
+lib/help.sh                        英文命令帮助与软件版本
+lib/nfcore_runtime.sh               容器/Conda 入口共用的 nf-core 运行配置
+lib/offline_bundle.py               下载调度、版本锁定、文件校验与打包
+lib/selection.sh                    candidates / lookup 共享参数解析
+lib/steps/                         reference、samplesheet、run、各下游步骤
+lib/steps/support/
+  annotation_policy.py             特征类别、位置规则、注释参数一致性检查
+  promoter_audit.py                 全窗口 peak 重叠核验，不改变基因归属
+  motif_selection.py               模型/位点筛选、CentriMo 解释、selection 摘要
+  candidates.py / lookup.py         候选整合、精确 ID 查询和最佳证据选择
+  fimo_tracks.py / track_layout.py  已有 FIMO 坐标转换、区域轨道高度
+ templates/                        init 使用的项目配置及三种分析样本表
+ env/ + setup_environments.sh       按用途构建 runtime 和独立下游环境
+ conf/nextflow.config               通用 Nextflow 配置
+ docs/                             当前离线部署、下游与筛选操作指南
+ tests/                            回归及可用时运行的真实工具集成检查
 ```
 
-关键点：仓库里**没有** `reference/`、`results/`、`logs/`、`samplesheets/`、`00_data/`。
-这些属于「某个数据集」，由 `chromaflow init` 在你选择的位置生成。
+内部步骤由 CLI 调用。直接调用内部脚本需要显式环境变量，且会绕过 CLI 的完整日志记录，
+不作为普通用户的推荐操作方式。
 
-## 一个「项目」的样子（= ②③，放在你的数据盘，不进这个仓库）
+## 配置与派生值
 
+`load_config` 分两遍读取配置，中间派生项目路径，允许配置引用 `${REFERENCE_DIR}`。
+参考路径的优先级是：config 显式值 > `.chromaflow/reference.manifest` > 目录识别 > 默认命名。
+旧配置写死参考路径时，新产物不会自动覆盖这些显式值。
+
+`samplesheet` 可测量读长，`reference` 可测量 MACS 有效基因组大小与 GC。
+派生值登记在 `<OUTPUT_DIR>/.chromaflow/derived.env`，不反复写回用户 config。
+基因组、GFF/GTF、读长及其他分析输入属于项目，不进入软件仓库。
+
+`normalize-gff` 的 `auto` 固定使用内置保守引擎，并非按 AGAT 是否安装而切换。
+原始记录身份与 Parent 图保持、GTF 转换验收、TxDb 显式 ID/Name 映射是分开的检查；
+非法关系或无法安全导出的模型明确失败。规则见 [GFF_NORMALIZATION.md](GFF_NORMALIZATION.md)。
+
+## nf-core 与环境
+
+`run` 根据 profile 选择容器或 Conda 入口。完整离线运行需要本地容器 bundle；
+`offline prepare/check/pack` 负责制包、校验及迁移，`code-only` 不等于完整可运行的离线包。
+Java、Python、Apptainer 以及 ChromaFlow 自有下游环境需另行提供。
+安装器的 offline / prepare / conda 模式见 [OFFLINE.md](docs/OFFLINE.md)。
+
+## 下游分支与统一筛选
+
+`DEFAULT_PEAKSET` 指定项目默认分支；显式 `--peakset` 优先，模板默认 idr。
+consensus、不同 IDR 阈值使用各自的目录后缀。请求缺失或失败的 IDR 集不会自动退回 consensus。
+`-o` 只改当前命令输出，不自动改变后续输入发现；`tracks --selection DIR` 则是显式衔接接口。
+
+ChIPseeker 的分类与最近 TSS 归属保持原始语义。位置规则由 candidates 和 lookup 共用，
+启动子核验独立列出整个配置窗口内的重叠 peak。lookup 仅匹配完整 ID，先展示示例并确认。
+
+共享 motif 模块先过滤模型及所有位点，然后将位点映射到 peak。lookup 在过滤后按证据级别、
+信号选择每个基因的最佳 peak；完整选择证据另行导出。CentriMo 局部/中央模式、模型发现 E 值、
+FIMO 位点 p/q 值各自记录，不混作同一统计量。
+
+selection 保存参数、输入/输出摘要和模型身份；tracks 校验来源后使用保存的基因和 motif，
+仍将绘图区间内的全部分支 peak、邻近基因结构传给绘图工具。详见 [SELECTION.md](docs/SELECTION.md)。
+
+## 输出与日志
+
+```text
+project/
+  chromaflow.config
+  samples_chipseq.txt
+  inputs/
+    raw/
+    reference/
+  outputs/
+    results/chipseq/
+    results/downstream/chipseq/{idr,annotation,motif,candidates,lookup,tracks,...}
+    logs/downstream/chipseq/
+    samplesheets/
+    work/
+    .chromaflow/
 ```
-/data/CrDof_DAPseq/                  # chromaflow init 生成
-├── chromaflow.config                # 这个数据集的配置（物种 + 路径）
-├── samples_dapseq.txt               # 样本与 fastq 路径
-├── inputs/
-│   ├── raw/                         # fastq（也可在 config 指向别处）
-│   └── reference/                   # 参考基因组源文件
-└── outputs/                         # 全部结果/日志/work/缓存（自动生成）
-    ├── results/{dapseq,downstream/dapseq/{idr,motif,annotation,signal}}
-    ├── logs/
-    ├── samplesheets/
-    ├── work/                        # nextflow work
-    ├── .chromaflow/                 # reference.manifest（参考产物登记表）
-    └── .singularity_cache/
-```
 
-## 使用
-
-```bash
-# 安装（一次）
-git clone https://github.com/<you>/ChromaFlow.git ~/ChromaFlow
-export PATH="$HOME/ChromaFlow/bin:$PATH"      # 建议写进 ~/.bashrc
-
-# 新建项目（放哪都行）
-chromaflow init /data/CrDof_DAPseq --type dapseq
-cd /data/CrDof_DAPseq
-# 编辑 chromaflow.config（物种 + 路径）与 samples_dapseq.txt
-
-# 逐步运行（项目目录内自动发现 ./chromaflow.config）
-chromaflow reference
-chromaflow samplesheet --type dapseq
-chromaflow run         --type dapseq
-# 下游逐步（各步 conda 环境不同，不提供一键 all）：
-mamba activate ChromaFlow_idr        && chromaflow idr      --type dapseq
-mamba activate ChromaFlow_motif      && chromaflow motif    --type dapseq
-mamba activate ChromaFlow_ref        && chromaflow annotate --type dapseq
-mamba activate ChromaFlow_downstream && chromaflow signal   --type dapseq
-```
-
-配置解析优先级：`-c <config>` > `$CHROMAFLOW_CONFIG` > `./chromaflow.config`
-
-## 关键设计点
-
-- **两遍 source 配置**：让 `chromaflow.config` 里能写 `ANNOTATION_INFO="${REFERENCE_DIR}/..."` 这类引用派生路径的行（第一遍取锚点 → `derive_paths` → 第二遍正确展开）。
-- **步骤自包含**：每个 step 自己 `source common.sh + load_config`，既能被 CLI 以子进程调用，也能 `CHROMAFLOW_HOME=... CHROMAFLOW_CONFIG=... bash lib/steps/06_...sh dapseq` 单独跑，便于调试。
-- **nextflow 产物归位**：`02` 里 `cd "${OUTPUT_DIR}"` 且传 `-w "${WORK_DIR}"`，使 `work/`、`.nextflow/`、日志全部落在 `OUTPUT_DIR`，代码目录不被污染。
-- **路径全部派生**：正文只用 `${RESULTS_DIR}` `${GENOME_GTF}` 等变量，语义与旧版一致，只是根从代码目录换成了 `OUTPUT_DIR`/`REFERENCE_DIR`。
-- **产物登记而非回填 config**：`00`/`00b` 生成的派生文件（combined.fa、chrom.sizes、gtf、*.agat.gff3）写入 `<OUTPUT_DIR>/.chromaflow/reference.manifest`，由 `load_reference_manifest` 读回；再叠加 `autodetect_reference_files` 的目录扫描兜底。解析优先级：**config 显式 > manifest > 目录扫描 > 兜底命名**。用户因此不需要把「脚本的输出」抄进「脚本的输入配置」。
-- **可选步骤可跳过**：`reference`（细胞器、GTF）、`normalize-gff`（AGAT）都是可选路径。缺件默认 WARN 并继续，`--strict` 才中断；AGAT 缺失时 `normalize-gff` 自动切换到内置 Python 引擎，因此 AGAT 的环境冲突不再阻塞主线。
-- **样本表宽松解析**：`make_samplesheet.py` 支持表头式/位置式/显式 fastq 三种记录方式，双端配对靠「文件名最右侧的双端记号」推断而非固定后缀表，可用 `pair_pattern` 模板覆盖。
+设置 `OUTPUT_DIR="${PROJECT_DIR}"` 可把 outputs 下这些目录直接放在项目根。
+下游目录按需创建。CLI 每次运行记录英文终端 stdout/stderr、命令、版本、config 路径和退出码，
+使用独立日志文件；尚未识别项目时的参数错误及进程中断存在文档所述的日志边界。

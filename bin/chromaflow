@@ -15,6 +15,8 @@
 # ============================================================================
 
 set -euo pipefail
+export LANGUAGE=en LC_MESSAGES=C LC_NUMERIC=C LC_TIME=C PYTHONUTF8=1 PYTHONIOENCODING=utf-8
+unset LC_ALL
 
 # 自动探测代码根目录（无论从哪里调用 / 软链接）
 SOURCE="${BASH_SOURCE[0]}"
@@ -40,22 +42,31 @@ usage() {
 }
 
 # ---- 参数解析 ----
+ORIGINAL_ARGS=("$@")
 CMD="${1:-}"; shift || true
 CONFIG=""; TYPE="chipseq"; WANT_HELP=0; POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -c|--config) CONFIG="$2"; shift 2 ;;
         -t|--type)   TYPE="$2";   shift 2 ;;
-        -o|--outdir) export CHROMAFLOW_OUTDIR="$2"; shift 2 ;;   # 全局输出目录覆盖(任何模式可用)
+        -o|--outdir) export CHROMAFLOW_OUTDIR="$2"; shift 2 ;;   # 全局Output directory覆盖(任何模式可用)
         --peakset)   export CHROMAFLOW_PEAKSET="$2"; shift 2 ;;  # 用哪套 peak: idr[:阈值] | consensus | <路径>
-        --profile)   export CHROMAFLOW_PROFILE="$2"; shift 2 ;;  # nf-core 执行模式: singularity|apptainer|docker|conda|mamba
+        --profile)   export CHROMAFLOW_PROFILE="$2"; shift 2 ;;  # nf-core Execution mode: singularity|apptainer|docker|conda|mamba
+        --offline)   export CHROMAFLOW_OFFLINE=true; shift ;;
+        --bundle)    export CHROMAFLOW_BUNDLE="$2"; shift 2 ;;
+        --yes)       export CHROMAFLOW_YES=true; shift ;;
+        --dry-run)   export CHROMAFLOW_DRY_RUN=true; shift ;;
         -h|--help)   WANT_HELP=1; shift ;;
+        # `--` 之后的一切原样透传给底层（目前 run 用来传 nextflow/nf-core 参数）
+        --)          POSITIONAL+=("--"); shift
+                     while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done ;;
         *)           POSITIONAL+=("$1"); shift ;;
     esac
 done
 
 # `chromaflow <cmd> --help` → 该命令的详细帮助；`chromaflow --help` → 总览
 if [[ ${WANT_HELP} -eq 1 ]]; then
+    if [[ "${CMD}" == setup ]]; then bash "${CHROMAFLOW_HOME}/setup_environments.sh" --help; exit 0; fi
     if [[ -n "${CMD}" && "${CMD}" != "help" ]]; then help_command "${CMD}"; else help_main; fi
     exit 0
 fi
@@ -63,14 +74,52 @@ fi
 # 需要配置的命令：解析并导出 CHROMAFLOW_CONFIG，子进程步骤自行加载
 need_config() {
     export CHROMAFLOW_CONFIG; CHROMAFLOW_CONFIG="$(resolve_config "${CONFIG}")"
-    [[ -f "${CHROMAFLOW_CONFIG}" ]] || die "配置文件不存在: ${CHROMAFLOW_CONFIG}"
+    [[ -f "${CHROMAFLOW_CONFIG}" ]] || die "Config file does not exist: ${CHROMAFLOW_CONFIG}"
 }
-run_step() { bash "${STEPS}/$1" "${@:2}"; }
+run_step() {
+    case "${TYPE}" in chipseq|atacseq|dapseq) ;; *) die "Invalid analysis type: ${TYPE}" ;; esac
+    case "${CMD}" in
+        idr|motif|annotate|annotate-py|candidates|lookup|signal|tracks|go-prep|go-plot|spacing)
+            load_config "${CHROMAFLOW_CONFIG}"
+            local log_root="${LOG_DIR}/downstream/${TYPE}" label file
+            label="${CHROMAFLOW_PEAKSET:-idr}"
+            [[ "${CMD}" != idr ]] || label=all_thresholds
+            case "${label}" in idr|idr:*|consensus) ;; all_thresholds) ;; *) label=custom ;; esac
+            label="${label//[^a-zA-Z0-9_.-]/_}"
+            mkdir -p "${log_root}"
+            file=$(mktemp --suffix=.log "${log_root}/$(date +%Y%m%d_%H%M%S)_${CMD}_${label}_XXXXXX")
+            echo "[LOG] ${file}"
+            export CHROMAFLOW_LOG_MANAGED=1 CHROMAFLOW_LOG_FILE="${file}"
+            set +e
+            (
+                printf '[START] %s\n[VERSION] %s\n[CONFIG] %s\n' \
+                    "$(date -Iseconds)" "${CHROMAFLOW_VERSION}" "${CHROMAFLOW_CONFIG}"
+                printf '[COMMAND] '; printf '%q ' "${BIN_DIR}/chromaflow" "${ORIGINAL_ARGS[@]}"; printf '\n'
+                printf '[LOG] %s\n' "${file}"
+                bash "${STEPS}/$1" "${@:2}"
+                rc=$?
+                printf '[END] %s exit_code=%s\n' "$(date -Iseconds)" "${rc}"
+                exit "${rc}"
+            ) 2>&1 | tee "${file}"
+            local statuses=("${PIPESTATUS[@]}")
+            set -e
+            [[ "${statuses[1]}" -eq 0 ]] || { echo '[ERROR] Writing the terminal log failed.' >&2; return 1; }
+            return "${statuses[0]}"
+            ;;
+        *) bash "${STEPS}/$1" "${@:2}" ;;
+    esac
+}
 
 case "${CMD}" in
+    setup) bash "${CHROMAFLOW_HOME}/setup_environments.sh" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+    offline)
+        # Preparing or checking a software bundle does not require a dataset.
+        if [[ -n "${CONFIG}" ]]; then need_config; fi
+        run_step offline.sh "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"}
+        ;;
     init)
         PROJECT_DIR_ARG="${POSITIONAL[0]:-}"
-        [[ -n "${PROJECT_DIR_ARG}" ]] || die "用法: chromaflow init <project_dir> [--type dapseq]"
+        [[ -n "${PROJECT_DIR_ARG}" ]] || die "Usage: chromaflow init <project_dir> [--type dapseq]"
         bash "${STEPS}/init_project.sh" "${PROJECT_DIR_ARG}" "${TYPE}"
         ;;
     reference)   need_config; run_step 00_prepare_reference.sh ${POSITIONAL[@]+${POSITIONAL[@]+"${POSITIONAL[@]}"}} ;;
@@ -83,8 +132,8 @@ case "${CMD}" in
         _PROFILE="$(CHROMAFLOW_CONFIG="${CHROMAFLOW_CONFIG}" bash -c \
             'source "'"${LIB}"'/common.sh"; load_config "${CHROMAFLOW_CONFIG}" >/dev/null 2>&1; resolve_nfcore_profile')"
         case ",${_PROFILE}," in
-            *,conda,*|*,mamba,*) run_step 02_run_nfcore_conda.sh "${TYPE}" ;;
-            *)                   run_step 02_run_nfcore.sh       "${TYPE}" ;;
+            *,conda,*|*,mamba,*) run_step 02_run_nfcore_conda.sh "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
+            *)                   run_step 02_run_nfcore.sh       "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
         esac
         ;;
     idr)         need_config; run_step 03_idr_analysis.sh     "${TYPE}" ${POSITIONAL[@]+"${POSITIONAL[@]}"} ;;
@@ -108,5 +157,5 @@ case "${CMD}" in
         ;;
     version|--version|-V) echo "chromaflow ${CHROMAFLOW_VERSION}"; ;;
     ""|-h|--help) usage 0 ;;
-    *) log_error "未知命令: ${CMD}"; usage 1 ;;
+    *) log_error "Unknown command: ${CMD}"; usage 1 ;;
 esac

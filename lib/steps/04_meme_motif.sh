@@ -3,12 +3,12 @@
 # 04_meme_motif.sh — MEME-ChIP de novo motif 发现
 # ============================================================================
 # 支持: chipseq / atacseq / dapseq
-# 环境: mamba activate ChromaFlow_motif
+# 环境: conda activate ChromaFlow_motif
 # 用法: chromaflow motif --type [chipseq|atacseq|dapseq]
 # ============================================================================
 
 set -euo pipefail
-source "${CHROMAFLOW_HOME:?请通过 chromaflow CLI 运行，或先 export CHROMAFLOW_HOME}/lib/common.sh"
+source "${CHROMAFLOW_HOME:?Run through the chromaflow CLI, or export CHROMAFLOW_HOME first}/lib/common.sh"
 load_config "${CHROMAFLOW_CONFIG:-}"
 init_dirs
 
@@ -25,11 +25,11 @@ log_section "Step 04: MEME-ChIP Motif Discovery (${PIPELINE})"
 MISSING=0
 for tool in meme-chip bedtools; do
     if ! command -v "${tool}" &>/dev/null; then
-        echo "[ERROR] ${tool} 未安装"; MISSING=1
+        echo "[ERROR] ${tool} is not installed"; MISSING=1
     fi
 done
 if [[ ${MISSING} -eq 1 ]]; then
-    echo "  请: mamba activate ChromaFlow_motif"; exit 1
+    echo "  Run: conda activate ChromaFlow_motif"; exit 1
 fi
 
 # ─────────────────────────────────────────────
@@ -40,45 +40,45 @@ fi
 resolve_peakset "${PIPELINE}" "${CHROMAFLOW_PEAKSET:-idr}"
 INPUT_PEAKS="${PEAKSET_FILE}"
 PEAK_SOURCE="${CHROMAFLOW_PEAKSET:-idr}"
-MOTIF_OUT="${RESULTS_DIR}/downstream/${PIPELINE}/motif${PEAKSET_SUFFIX}"
+MOTIF_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/motif${PEAKSET_SUFFIX}")"
 mkdir -p "${MOTIF_OUT}"
 
-[[ -s "${INPUT_PEAKS}" ]] || { echo "[ERROR] peakset peak 文件为空: ${INPUT_PEAKS}"; exit 1; }
+[[ -s "${INPUT_PEAKS}" ]] || { echo "[ERROR] Peak-set file is empty: ${INPUT_PEAKS}"; exit 1; }
 
 echo "  Pipeline:    ${PIPELINE}"
 echo "  peakset:     ${PEAK_SOURCE}  → $(basename "${INPUT_PEAKS}")"
-echo "  输入 peaks:  ${INPUT_PEAKS}"
-echo "  输出目录:    ${MOTIF_OUT}"
+echo "  Input peaks:  ${INPUT_PEAKS}"
+echo "  Output directory:    ${MOTIF_OUT}"
 N_PEAKS=$(wc -l < "${INPUT_PEAKS}")
-echo "  Peak 数量:   ${N_PEAKS}"
+echo "  Peak count:   ${N_PEAKS}"
 echo ""
 
 if [[ ${N_PEAKS} -lt 10 ]]; then
-    echo "[ERROR] peak 数量太少 (<10)"; exit 1
+    echo "[ERROR] Too few peaks (<10)"; exit 1
 fi
 
 # ─────────────────────────────────────────────
 # STEP 1: 基因组背景模型
 # ─────────────────────────────────────────────
-echo "[STEP 1] 生成基因组背景模型"
+echo "[STEP 1] Generate genome background model"
 # 背景 GC 由 fasta-get-markov 直接从真实序列估计（含 1 阶二核苷酸频率），
 # 不需要在 config 里手填 GC 值——手填的数既不会被用到，也可能与基因组不符。
 BG_MODEL="${MOTIF_OUT}/genome_background.txt"
 if [[ -f "${BG_MODEL}" ]]; then
-    echo "  [SKIP] 已存在"
+    echo "  [SKIP] Already exists"
 else
     fasta-get-markov -m 1 "${GENOME_COMBINED}" "${BG_MODEL}"
     echo "  [DONE]"
 fi
 # 从背景模型里读回实测 GC，仅作展示
 BG_GC="$(awk '$1=="C"||$1=="G" {s+=$2} END {if (s>0) printf "%.1f", 100*s}' "${BG_MODEL}" 2>/dev/null || true)"
-[[ -n "${BG_GC}" ]] && echo "  实测背景 GC: ${BG_GC}%"
+[[ -n "${BG_GC}" ]] && echo "  Measured background GC: ${BG_GC}%"
 echo ""
 
 # ─────────────────────────────────────────────
 # STEP 2: 提取 peak 序列
 # ─────────────────────────────────────────────
-echo "[STEP 2] 提取 peak 序列"
+echo "[STEP 2] Extract peak sequences"
 
 SUMMIT_BED="${MOTIF_OUT}/peak_regions_200bp.bed"
 PEAK_FASTA="${MOTIF_OUT}/peak_sequences.fa"
@@ -92,7 +92,7 @@ if [[ ${n_cols} -ge 10 ]]; then
         end = summit + 100
         print $1, start, end, $4, $5, "+"
     }' "${INPUT_PEAKS}" > "${SUMMIT_BED}"
-    echo "  格式: narrowPeak, summit ± 100bp"
+    echo "  Format: narrowPeak, summit ± 100bp"
 else
     awk 'BEGIN{OFS="\t"} {
         center = int(($2+$3)/2)
@@ -100,12 +100,12 @@ else
         end = center + 100
         print $1, start, end, ($4!=""?$4:"peak_"NR), ($5!=""?$5:0), "+"
     }' "${INPUT_PEAKS}" > "${SUMMIT_BED}"
-    echo "  格式: BED, peak 中心 ± 100bp"
+    echo "  Format: BED, peak midpoint ± 100bp"
 fi
 
 bedtools getfasta -fi "${GENOME_COMBINED}" -bed "${SUMMIT_BED}" -fo "${PEAK_FASTA}" -name+
 N_SEQS=$(grep -c "^>" "${PEAK_FASTA}")
-echo "  提取序列: ${N_SEQS} 条 × 200bp"
+echo "  Extracted sequences: ${N_SEQS} sequences x 200 bp"
 echo ""
 
 # ─────────────────────────────────────────────
@@ -114,23 +114,23 @@ echo ""
 # 输入 peak 已经过 IDR/consensus 严格筛选，不再二次截断到 top-N，
 # 直接用全部序列，忠实反映当前 peakset 的筛选结果。
 INPUT_FASTA="${PEAK_FASTA}"
-echo "  使用全部 ${N_SEQS} 条 peak 序列（不再截断 top-N）"
+echo "  Using all ${N_SEQS} peak sequences (no top-N truncation)"
 echo ""
 
 # ─────────────────────────────────────────────
 # STEP 4: MEME-ChIP
 # ─────────────────────────────────────────────
-echo "[STEP 3] 运行 MEME-ChIP"
+echo "[STEP 3] Run MEME-ChIP"
 echo ""
 
 MEMECHIP_OUT="${MOTIF_OUT}/meme-chip_output"
 
-DB_ARGS=""
+DB_ARGS=()
 if [[ -f "${MEME_DB}" ]]; then
-    DB_ARGS="-db ${MEME_DB}"
-    echo "  motif 数据库: $(basename ${MEME_DB})"
+    DB_ARGS=(-db "${MEME_DB}")
+    echo "  Motif database: $(basename ${MEME_DB})"
 else
-    echo "  ⚠  未找到 motif 数据库，仅做 de novo 发现"
+    echo "  ⚠  Motif database not found; running de novo discovery only"
 fi
 
 # 关键：MEME 内部用 -meme-searchsize 限制参与 motif 搜索的序列字符数（默认会截断）。
@@ -138,12 +138,12 @@ fi
 # 注意：MEME 运行时间随 searchsize 约平方增长，序列很多时(如 consensus 1161)会较慢；
 # 需要限制时把 MEME_SEARCHSIZE 设成一个具体字符数即可。
 MEME_SEARCHSIZE="${MEME_SEARCHSIZE:-0}"
-echo "  -meme-searchsize=${MEME_SEARCHSIZE}（0=用全部 ${N_SEQS} 条序列，不截断）"
+echo "  -meme-searchsize=${MEME_SEARCHSIZE}(0=all ${N_SEQS} sequences, without truncation)"
 
 meme-chip \
     -oc "${MEMECHIP_OUT}" \
     -bfile "${BG_MODEL}" \
-    ${DB_ARGS} \
+    "${DB_ARGS[@]}" \
     -minw 6 \
     -maxw 15 \
     -meme-nmotifs 10 \
@@ -152,21 +152,21 @@ meme-chip \
     -centrimo-local \
     "${INPUT_FASTA}"
 
-echo "  [DONE] MEME-ChIP 完成"
+echo "  [DONE] MEME-ChIP completed"
 
 # ─────────────────────────────────────────────
 # 总结
 # ─────────────────────────────────────────────
 echo ""
 echo "============================================"
-echo " Motif 分析总结 (${PIPELINE})"
+echo " Motif analysis summary (${PIPELINE})"
 echo "============================================"
 echo ""
-echo "  输入 peaks:     ${N_PEAKS} (${PEAK_SOURCE})"
-echo "  GC 背景模型:    由基因组序列实测 (${BG_GC:-?}% GC)"
-echo "  输出目录:       ${MOTIF_OUT}"
-echo "  MEME-ChIP 报告: ${MEMECHIP_OUT}/meme-chip.html"
+echo "  Input peaks:     ${N_PEAKS} (${PEAK_SOURCE})"
+echo "  GC background model:    measured from genome sequence (${BG_GC:-?}% GC)"
+echo "  Output directory:       ${MOTIF_OUT}"
+echo "  MEME-ChIP report: ${MEMECHIP_OUT}/meme-chip.html"
 echo ""
 echo "[DONE] $(date)"
 echo ""
-echo "下一步(用同一 peakset): chromaflow annotate --type ${PIPELINE} ${CHROMAFLOW_PEAKSET:+--peakset ${CHROMAFLOW_PEAKSET}}"
+echo "Next step (use the same peak set): chromaflow annotate --type ${PIPELINE} ${CHROMAFLOW_PEAKSET:+--peakset ${CHROMAFLOW_PEAKSET}}"

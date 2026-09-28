@@ -1,0 +1,18 @@
+{
+  "version": "2026-09-22.1",
+  "scope": "Curated offline role mapping, not a complete Sequence Ontology closure. Unknown types remain unchanged; extend with --type-map.",
+  "sources": [
+    "https://raw.githubusercontent.com/The-Sequence-Ontology/SO-Ontologies/master/Ontology_Files/so-simple.obo (data-version 2026-08-07)",
+    "https://github.com/The-Sequence-Ontology/Specifications/blob/master/gff3.md",
+    "https://github.com/Bioconductor/txdbmaker/blob/devel/R/makeTxDbFromGRanges.R"
+  ],
+  "roles": {
+    "gene": ["gene", "SO:0000704", "protein_coding_gene", "ncRNA_gene", "pseudogene", "transposable_element_gene", "SO:0000111", "tRNA_gene", "rRNA_gene", "snRNA_gene", "snoRNA_gene", "miRNA_gene", "lincRNA_gene", "lncRNA_gene"],
+    "transcript": ["transcript", "SO:0000673", "mRNA", "SO:0000234", "primary_transcript", "pseudogenic_transcript", "ncRNA", "lnc_RNA", "lncRNA", "lincRNA", "tRNA", "rRNA", "snRNA", "snoRNA", "miRNA", "pre_miRNA", "scRNA", "SRP_RNA", "RNase_P_RNA", "RNase_MRP_RNA", "antisense_RNA", "guide_RNA", "telomerase_RNA"],
+    "exon": ["exon", "SO:0000147", "pseudogenic_exon"],
+    "cds": ["CDS", "SO:0000316", "transposable_element_CDS"],
+    "utr5": ["five_prime_UTR", "SO:0000204", "five_prime_untranslated_region", "5'UTR", "5UTR", "UTR5"],
+    "utr3": ["three_prime_UTR", "SO:0000205", "three_prime_untranslated_region", "3'UTR", "3UTR", "UTR3"],
+    "utr": ["UTR", "untranslated_region", "SO:0000203"]
+  }
+}

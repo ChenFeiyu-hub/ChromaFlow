@@ -12,7 +12,7 @@
 # ============================================================================
 
 set -euo pipefail
-source "${CHROMAFLOW_HOME:?请通过 chromaflow CLI 运行，或先 export CHROMAFLOW_HOME}/lib/common.sh"
+source "${CHROMAFLOW_HOME:?Run through the chromaflow CLI, or export CHROMAFLOW_HOME first}/lib/common.sh"
 load_config "${CHROMAFLOW_CONFIG:-}"
 init_dirs
 
@@ -45,15 +45,15 @@ OUTPUT_CSV="$(step_outdir "${SAMPLESHEET_DIR}")/samplesheet_${PIPELINE}.csv"
 open_log "01_make_samplesheet" "${PIPELINE}"
 log_section "Generate nf-core/${NFCORE_PIPELINE} samplesheet (${PIPELINE})"
 
-echo "  样本表: ${SAMPLES_TXT}"
-echo "  输出:   ${OUTPUT_CSV}"
+echo "  Sample sheet: ${SAMPLES_TXT}"
+echo "  Output:   ${OUTPUT_CSV}"
 echo ""
 
 if [[ ! -f "${SAMPLES_TXT}" ]]; then
-    log_error "找不到样本表: ${SAMPLES_TXT}"
-    echo "  可用 --samples <file> 指定，或在 config 里设 SAMPLES_FILE，"
-    echo "  或把样本表放在 ${PROJECT_DIR}/samples_${PIPELINE}.txt"
-    echo "  模板: ${CHROMAFLOW_HOME}/templates/samples_${PIPELINE}.txt"
+    log_error "Sample sheet not found: ${SAMPLES_TXT}"
+    echo "  Use --samples <file> or set SAMPLES_FILE in config,"
+    echo "  or save it to ${PROJECT_DIR}/samples_${PIPELINE}.txt"
+    echo "  Template: ${CHROMAFLOW_HOME}/templates/samples_${PIPELINE}.txt"
     exit 1
 fi
 
@@ -68,10 +68,10 @@ python3 "${CHROMAFLOW_HOME}/lib/steps/make_samplesheet.py" \
 # 不改 config。config 里显式写了 READ_LENGTH 就以你的为准。
 if [[ "$(value_origin READ_LENGTH)" == "config" ]]; then
     echo ""
-    echo "  读长: ${READ_LENGTH}（config 指定，不再实测）"
+    echo "  Read length: ${READ_LENGTH}(configured; measurement skipped)"
 elif [[ -f "${OUTPUT_CSV}" ]]; then
     echo ""
-    echo "[实测] 从 fastq 抽样测读长..."
+    echo "[measured] Sampling FASTQ to measure read length..."
     MAX_LEN=0
     while IFS=, read -r _s fq1 _rest; do
         [[ "${fq1}" == "fastq_1" || -z "${fq1}" ]] && continue
@@ -80,16 +80,16 @@ elif [[ -f "${OUTPUT_CSV}" ]]; then
     done < "${OUTPUT_CSV}"
     if [[ "${MAX_LEN}" -gt 0 ]]; then
         derived_set READ_LENGTH "${MAX_LEN}"
-        echo "  [DONE] READ_LENGTH = ${MAX_LEN} bp（取抽样最大值；已记入 derived.env）"
+        echo "  [DONE] READ_LENGTH = ${MAX_LEN} bp (maximum sampled length; recorded in derived.env)"
         OLD_K="$(derived_get MACS_GSIZE_SIG 2>/dev/null || true)"
         if [[ -n "${OLD_K}" && "${OLD_K}" != *"k=${MAX_LEN}" ]]; then
-            echo "  提示: 已有的 MACS_GSIZE 是按 ${OLD_K##*k=} 的 k 测的；"
-            echo "        影响通常在 1% 内，若要严格对齐可跑 chromaflow reference --force"
+            echo "  Existing MACS_GSIZE was measured with k=${OLD_K##*k=};"
+            echo "        To align the k-mer size with this read length, run chromaflow reference --force"
         fi
     else
-        log_warn "读长实测失败（fastq 不可读？）；02 会在需要时回退到 nf-core 自行计算"
+        log_warn "Read-length measurement failed; check FASTQ readability before running nf-core"
     fi
 fi
 
 echo ""
-echo "下一步: mamba activate nfcore_env && chromaflow run --type ${PIPELINE}"
+echo "Next step: conda activate nfcore_env && chromaflow run --type ${PIPELINE}"

@@ -2,7 +2,7 @@
 # ============================================================================
 # 08_go_analysis.sh — GO 富集辅助（面向外部 agriGO / g:Profiler 工作流）
 # ============================================================================
-# 环境: mamba activate ChromaFlow_ref   (需 python3 + matplotlib)
+# 环境: conda activate ChromaFlow_ref   (需 python3 + matplotlib)
 # 两个子命令：
 #   chromaflow go-prep --type chipseq [--set promoter|dist|all]
 #       → 导出可直接上传 agriGO/g:Profiler 的基因 ID 列表 + 背景全集
@@ -12,12 +12,12 @@
 # 思路：富集在外部网站跑（衣藻等物种 agriGO 不支持时用 g:Profiler），
 # 本脚本只负责「出干净的输入」和「把结果画成图」，与在线库解耦。
 # ============================================================================
-set -uo pipefail
-source "${CHROMAFLOW_HOME:?请通过 chromaflow CLI 运行，或先 export CHROMAFLOW_HOME}/lib/common.sh"
+set -euo pipefail
+source "${CHROMAFLOW_HOME:?Run through the chromaflow CLI, or export CHROMAFLOW_HOME first}/lib/common.sh"
 load_config "${CHROMAFLOW_CONFIG:-}"
 init_dirs
 
-MODE="${1:?用法: go-prep 或 go-plot}"; shift || true
+MODE="${1:?Usage: go-prep or go-plot}"; shift || true
 PIPELINE="chipseq"; SET="promoter"; INPUT=""; TOPN=20
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -29,24 +29,33 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 init_pipeline_dirs "${PIPELINE}"
-ANNO_OUT="${RESULTS_DIR}/downstream/${PIPELINE}/annotation"
-GO_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/go")"
+PEAKSET_SUFFIX=""
+case "${CHROMAFLOW_PEAKSET:-idr}" in
+    idr|idr:0.01) ;;
+    idr:*) PEAKSET_SUFFIX="_idr${CHROMAFLOW_PEAKSET#idr:}" ;;
+    consensus) PEAKSET_SUFFIX=_consensus ;;
+    *) PEAKSET_SUFFIX=_custom ;;
+esac
+ANNO_OUT="${RESULTS_DIR}/downstream/${PIPELINE}/annotation${PEAKSET_SUFFIX}"
+GO_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/go${PEAKSET_SUFFIX}")"
 mkdir -p "${GO_OUT}"
 
 # ============================================================================
 # 子命令 1: go-prep — 导出基因列表
 # ============================================================================
 if [[ "${MODE}" == "prep" ]]; then
+    # A failed upstream IDR run must not silently export an older annotation.
+    resolve_peakset "${PIPELINE}" "${CHROMAFLOW_PEAKSET:-idr}"
     open_log "08_go_prep" "${PIPELINE}"
-    log_section "Step 08a: GO 输入导出 (${PIPELINE}, set=${SET})"
+    log_section "Step 08a: Export GO inputs (${PIPELINE}, set=${SET})"
 
     case "${SET}" in
         promoter) SRC="${ANNO_OUT}/promoter_target_genes.txt" ;;
         dist)     SRC=$(find "${ANNO_OUT}" -name "target_genes_within_*kb.txt" | head -1) ;;
         all)      SRC="${ANNO_OUT}/all_nearest_genes.txt" ;;
-        *) die "--set 只能是 promoter|dist|all" ;;
+        *) die "--set must be promoter|dist|all" ;;
     esac
-    [[ -s "${SRC}" ]] || die "找不到靶基因列表: ${SRC}（先跑 chromaflow annotate）"
+    [[ -s "${SRC}" ]] || die "Target gene list not found: ${SRC}(run chromaflow annotate first)"
     UNIV="${ANNO_OUT}/background_universe.txt"
 
     # 原始 ID
@@ -61,38 +70,38 @@ if [[ "${MODE}" == "prep" ]]; then
         sed -E 's/\.[0-9]+$//' "${UNIV}" | sort -u > "${GO_OUT}/background.stripped.txt"
         n_bg=$(wc -l < "${GO_OUT}/background.stripped.txt")
     else
-        n_bg=0; warn "无 background_universe.txt（自定义背景可选，但强烈建议提供）"
+        n_bg=0; log_warn "No background_universe.txt; supply an appropriate custom background for enrichment"
     fi
 
     cat > "${GO_OUT}/README_GO.txt" <<EOF
-GO 富集：外部执行说明
+GO enrichment: external analysis instructions
 =====================================
-靶基因集 (${SET}): ${n_raw} 个 (去后缀后 ${n_str})
-背景全集: ${n_bg} 个
+Target gene set (${SET}): ${n_raw} genes (after suffix removal: ${n_str})
+Background universe: ${n_bg} genes
 
-上传文件：
-  target_${SET}.stripped.txt   ← 前景基因（去后缀，多数工具用这个）
-  background.stripped.txt       ← 自定义背景（务必用它，别用工具默认全基因组）
+Input files:
+  target_${SET}.stripped.txt   ← Foreground with suffix removed; verify ID namespace before use
+  background.stripped.txt       ← Custom background; use the same ID namespace as the foreground
 
-选择工具：
-  · 陆生植物(拟南芥/水稻/玉米等) agriGO 支持 → 用 target_${SET}.stripped.txt
-  · 莱茵衣藻等 agriGO 不支持 → 用 g:Profiler（选物种或上传自定义 GMT）
-  · 若 ID 不匹配，试 target_${SET}.raw.txt（带后缀版）
+Choose a compatible enrichment tool:
+  · For supported plant species, agriGO can use target_${SET}.stripped.txt
+  · For other species, use a supported service or a custom GMT
+  · If IDs do not match, check target_${SET}.raw.txt and the reference namespace
 
-拿到结果后：
-  chromaflow go-plot --input <下载的结果表> --type ${PIPELINE} --top 20
+After obtaining enrichment results:
+  chromaflow go-plot --input <downloaded-results-table> --type ${PIPELINE} --top 20
 EOF
 
-    echo "  靶基因(${SET}): ${n_raw} (去后缀 ${n_str})"
-    echo "  背景: ${n_bg}"
+    echo "  Target genes(${SET}): ${n_raw} (suffix removed: ${n_str})"
+    echo "  Background: ${n_bg}"
     echo ""
-    echo "  已导出到: ${GO_OUT}/"
-    echo "    · target_${SET}.stripped.txt   （上传前景）"
-    echo "    · background.stripped.txt       （上传背景）"
-    echo "    · README_GO.txt                 （工具选择说明）"
+    echo "  Exported to: ${GO_OUT}/"
+    echo "    · target_${SET}.stripped.txt   (foreground)"
+    echo "    · background.stripped.txt       (background)"
+    echo "    · README_GO.txt                 (tool selection notes)"
     echo ""
-    echo "  → 外部跑完 agriGO/g:Profiler 后："
-    echo "    chromaflow go-plot --input 结果表.txt --type ${PIPELINE}"
+    echo "  → After external enrichment analysis:"
+    echo "    chromaflow go-plot --input results.tsv --type ${PIPELINE}"
     echo "[DONE] $(date)"
     exit 0
 fi
@@ -102,9 +111,9 @@ fi
 # ============================================================================
 if [[ "${MODE}" == "plot" ]]; then
     open_log "08_go_plot" "${PIPELINE}"
-    log_section "Step 08b: GO 结果可视化 (${PIPELINE})"
-    [[ -n "${INPUT}" && -f "${INPUT}" ]] || die "需 --input 指向 agriGO/g:Profiler 结果表"
-    python3 -c "import matplotlib" 2>/dev/null || die "需 matplotlib（mamba activate ChromaFlow_ref）"
+    log_section "Step 08b: Plot GO results (${PIPELINE})"
+    [[ -n "${INPUT}" && -f "${INPUT}" ]] || die "--input must point to an enrichment result table"
+    python3 -c "import matplotlib" 2>/dev/null || die "Requires matplotlib (conda activate ChromaFlow_ref)"
 
     python3 - "${INPUT}" "${GO_OUT}" "${TOPN}" <<'PYEOF'
 import sys, csv, re
@@ -160,7 +169,7 @@ for r in rows[1:]:
     data.append({"term":term,"p":p,"cat":cat,"cnt":cnt})
 
 if not data:
-    sys.exit("未能从结果表解析出可用行；请确认这是 agriGO/g:Profiler 富集结果表")
+    sys.exit("No usable rows found; check enrichment result columns and delimiters")
 
 import math
 for d in data: d["score"] = -math.log10(d["p"])
@@ -202,13 +211,13 @@ ax.set_xlabel("-log10(FDR)"); ax.set_title(f"GO enrichment (top {len(terms)})")
 plt.tight_layout()
 plt.savefig(f"{outdir}/go_enrichment_bar.png", dpi=200); plt.close()
 
-print(f"  解析 {len(rows)-1} 行，画出 top {len(terms)}")
-print(f"  列映射: term={i_term} p={pcol} cat={i_cat} count={i_cnt}")
+print(f"  Parsed {len(rows)-1} rows; plotting top {len(terms)} terms")
+print(f"  Column mapping: term={i_term} p={pcol} cat={i_cat} count={i_cnt}")
 print(f"  → go_enrichment_bubble.png, go_enrichment_bar.png")
 PYEOF
-    echo "  输出: ${GO_OUT}"
+    echo "  Output: ${GO_OUT}"
     echo "[DONE] $(date)"
     exit 0
 fi
 
-die "未知 MODE: ${MODE}（用 prep 或 plot）"
+die "Unknown MODE: ${MODE} (use prep or plot)"

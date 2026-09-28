@@ -1,5 +1,170 @@
 # Changelog
 
+## v1.2.7 — shared motif selection and auditable tracks
+
+Documentation review (2026-09-28): expand both READMEs with repository installation,
+consensus-only operation, annotation policy, exact-ID lookup, shared filter options
+and selection-to-tracks commands. Align current deployment/architecture guides and
+replace historical personal deployment paths with generic public examples. Runtime code
+is unchanged from the tested v1.2.7 package.
+
+- Share exact-model, FIMO p/q, discovery E-value and optional CentriMo filters
+  between candidates and lookup; filter every peak before ranking. Reject absent
+  requested statistics/unscanned models; record model identities and PWM hashes.
+- Export selected genes/evidence and a hashed selection manifest. Add tracks
+  --selection and candidates --plot; lookup --level controls its plots too.
+  Preserve all context peaks and neighboring isoforms. Reject changed source
+  files, cross-branch selections and changed promoter parameters.
+- Separate local/central CentriMo modes, E-value threshold status and unavailable
+  results. Defaults retain candidates without imposing extra motif filters.
+- Add opt-in DEFAULT_PEAKSET project setting; CLI branch selection wins.
+- Scale gene/motif track heights to regional content and preserve three significant
+  digits in peak labels; identify ratio inputs/pseudocount in logs.
+- Correct SPP quality tags (-2/-1/0/1/2 = very low/low/medium/high/very high).
+- Keep exact gene IDs, annotation rules, GFF/TxDb code and offline bundles unchanged.
+
+## v1.2.6 — explicit annotation policy, promoter audits and exact gene IDs
+
+- Make ChIPseeker's gene-level nearest-TSS assignment and feature priority explicit.
+  Verify that Promoter labels agree with the configured inclusive TSS-distance
+  window; record parameters and the annotation hash, and reject stale parameter
+  combinations in candidates, lookup and tracks. Honor MAKE_PLOTS for R figures.
+- Share feature parsing and location rules between candidates and lookup. Recognize
+  exon/intron rank 1 in ChIPseeker text, including negative-strand transcripts,
+  without species-specific naming rules. Preserve raw annotations and append
+  feature_class. The project template accepts Promoter, 5' UTR and 1st Exon;
+  existing explicit TARGET_FEATURES values remain authoritative.
+- Embed promoter-region audits in annotate (all genes), lookup and tracks (query
+  genes). Use strand-aware gene-level windows from the same PROMOTER_UP/DOWN,
+  include TSS and endpoints, clip to reference boundaries, and report every
+  overlapping selected peak, including other-assigned and unannotated peaks.
+  These supplementary associations never replace ChIPseeker's assigned gene.
+- Remove lookup's automatic ID suffix normalization. Show exact-ID examples and
+  match counts, require y/N confirmation, and support explicit --yes for unattended
+  runs. Zero matches fail; partial unmatched IDs are separately reported. Use exact
+  gene IDs in tracks too. lookup --plot now draws the complete query list.
+- Show all selected peaks and neighboring genes in the track region, mark promoter
+  windows, and expand short flanks to contain the promoter. Improve label margins;
+  verify both strands with real pyGenomeTracks using synthetic data.
+- Retire unused automatic top-N options from the template. Use standard ChromaFlow
+  commands for the entire retest; no project-specific execution kit is needed.
+- Preserve GFF/GTF normalization, offline bundles and successful nf-core outputs.
+
+## v1.2.5 — IDR interval ordering and gene-list motif tracks
+
+- Re-sort bedtools annotate output before recovering MACS signal with map.
+  A real-bedtools regression spanning interval bins and sequence names reproduces
+  the 1.2.4 failure and verifies the fix. Preserve IDR fitting and thresholds.
+- Reject GO preparation from a marked failed/incomplete IDR run, including when
+  older annotation files remain. Rerun annotation after rebuilding IDR.
+- Respect the R annotation consistency flag instead of counting missing `NA`
+  feature-gene values as conflicting gene IDs. Correct the dropped-peak log's
+  units. Candidate location/motif selection is unchanged.
+- Add opt-in `tracks --motifs --flank BP`: existing FIMO hits, input windows
+  recovered from the extracted FASTA, and unfiltered regional signal/peaks/genes.
+  Export hit coordinates and per-query plotting status. No new genome scan.
+- Document one-best-peak lookup semantics, all-gene plotting, feature/nearest-TSS
+  ambiguity, and the difference between candidates' distance rescue and lookup.
+- Validated GFF/GTF, successful nf-core results and existing environments/bundles
+  can be reused. Actual full-data rendering remains a server-side validation.
+
+## v1.2.4 — downstream logs, clearer plots and deployment modes
+
+- Capture each downstream CLI invocation's stdout/stderr in a unique project
+  `logs/downstream/<type>/` log, with command, version, config and exit status.
+  Translate owned runtime/help/plot messages to English; retain biological IDs.
+- Create feature output directories on demand. Respect peakset selection for
+  signal, GO preparation, Python annotation and motif spacing; avoid silent IDR
+  fallback. Honor output overrides in IDR and motif commands too.
+- Replace ChIPseeker's diverging percentage TSS chart with explicit directional
+  bins, counts, percentages and a TSV containing boundaries/denominators. Add a
+  standalone redraw helper. Label deepTools center plots as peak midpoints.
+- Surface failures from IDR, bedtools, deepTools, integration and track rendering.
+  Reject mixed-condition IDR input and mark incomplete IDR runs. Recover actual
+  MACS signalValue from replicate peaks rather than reusing the p-value rank
+  column; handle broadPeak global-IDR column placement. Correct the Python
+  consensus overlap search for long/nested peaks without a fixed-length cutoff.
+- Add `chromaflow setup` with offline/prepare/conda modes and runtime/downstream
+  components. Offline runtime needs only Python/Java; nf-core process Conda envs
+  are unnecessary with the local container bundle. Keep existing environments.
+- Document both bundles, shared /opt installation, target validation, config,
+  upgrades and downstream branches. Use a generic species template; leave
+  measured values unset, optional organelles empty and online KEGG disabled.
+- Include the 1.2.3 TxDb identity hotfix. Preserve the GFF normalization and GTF
+  conversion implementations; validated references and existing bundles can be
+  reused. This update does not require repeating a successful nf-core run.
+- New archive checksums use LF. Tests cover logger errors/uniqueness, branch
+  isolation, environment plans and real-bedtools IDR output processing. Full
+  ChIPseeker/MEME/deepTools runs and fresh Conda solving remain target checks.
+
+### 1.2.3 TxDb identity hotfix (2026-09-23)
+
+- Fix the acceptance check's assumption that TxDb `tx_name`/`gene_id` must
+  equal GFF `ID`/`Parent`. Match only explicit GFF ID, Name, transcript_id and
+  gene_id relationships, with separate transcript and gene namespaces.
+- Retain exact gene-edge, sequence, strand, TSS and exported-span checks.
+  Reject ambiguous names, missing/duplicate transcripts and split identities;
+  do not strip species-specific version suffixes or match by coordinates alone.
+- Export lossless gene edges and auditable GFF-to-TxDb identity maps. The
+  existing ChIPseeker importer and its public naming policy remain unchanged.
+- Normalized GFF/GTF and offline bundles need no regeneration for this fix.
+  The original 1.2.3 archives remain immutable; distribute a separate hotfix.
+
+## v1.2.3 — conservative GFF3 normalization and validated GTF regeneration
+
+- Preserve every source feature record, including existing TE/unknown gene types,
+  IDs, multiple Parent edges, coordinates, phase and attributes. No species or
+  identifier-prefix branches. Unknown types are not missing nodes.
+- Check syntax, incompatible ID collisions, dangling parents and cycles; allow
+  compatible discontinuous features. Recover missing genes only with explicit
+  `--repair-missing-parents` and consistent evidence for the original Parent ID.
+- Add only evidence-supported exons and terminal UTRs. Do not invent exons from
+  transcript spans, shrink coordinates or classify internal CDS gaps as UTRs.
+- Fix `auto` to builtin; validate source-record preservation for external engines
+  too. Default filename is `.normalized.gff3`; explicit legacy names still work.
+- Atomically publish validated files; record hashes, actual engine/version, policy,
+  offline role map, warnings and a per-addition TSV audit. Cache reuse requires
+  matching content and rules; unknown/stale outputs are regenerated.
+- Regenerate GTF when its source/rules/converter change; verify transcript-to-gene
+  assignments before publishing. Reference preparation retains the registered
+  normalized GFF instead of replacing it with its original source.
+- Expose TxDb construction warnings. Add a server-side TxDb/TSS acceptance tool.
+- Remove fixed MACS_GSIZE/READ_LENGTH placeholder examples from the main config;
+  explicit overrides remain supported. Existing nf-core bundles remain usable.
+- See `GFF_NORMALIZATION.md` for policy, compatibility boundaries and migration.
+
+## v1.2.2 — fixed ATAC offline plugin version
+
+- Pin the unversioned nf-validation declaration in the downloaded copy of
+  nf-core/atacseq 2.1.2 to 1.1.3. Explicit upstream versions remain unchanged;
+  unknown releases still require a fixed plugin declaration.
+- Verify actual ATAC 2.1.2 help startup with Nextflow 25.10.4 in offline mode
+  using the locally installed nf-validation 1.1.3; all 21 WSL tests pass.
+- Document preparing, transferring and selecting separate ChIP/DAP and ATAC bundles.
+  Full ATAC container download and target-server sample analysis remain deployment checks.
+
+## v1.2.1 — offline plugin directory fix
+
+- Recognize Nextflow's `id-version` plugin installation directories while retaining
+  `id@version` in plugin declarations and install commands. Version 1.2.0 incorrectly
+  rejected a successfully installed `nf-validation@1.1.3` plugin.
+- Resume the same bundle after this failure by reusing its existing workflow,
+  containers and installed plugin; no cache deletion or directory renaming is needed.
+- Correct the test fixtures to match Nextflow's actual layout and cover recovery
+  without additional downloads, wrong versions and empty JAR files.
+
+## v1.2.0 — local nf-core deployment
+
+- Add offline prepare/check/pack commands for fixed-release Linux container bundles.
+- Bundle pipeline code, local nf-core configs, Nextflow runtime, pinned plugins and
+  Singularity images; include a SHA256 inventory and relocatable tar export.
+- Add run --offline --bundle, --dry-run and --yes; check bundle/type/version before launch.
+- Keep online Conda/container runs; full offline Conda environment migration is not included.
+- Write Nextflow debug logs directly under OUTPUT_DIR/logs and report the path on failure.
+- Honor the CLI --profile in container runs and check the executable actually selected.
+- See OFFLINE.zh-CN.md for deployment, verification and upgrades. Linux data analysis
+  must be validated on the target host; bundle checks are not biological validation.
+
 ## v1.1.0 — maintenance release
 
 ### 1. Sample records and read pairing (`make_samplesheet.py`, `01`)
@@ -102,6 +267,170 @@
   `fasta-get-markov`, and it now reports the GC read back from that model.
 - `doctor` shows each measured value with its origin (config / measured / not
   yet measured).
+
+### 4d. Species parameters clarified + early chromosome-name check
+- Documented that only `SPECIES_SHORT` is functional (prefix for derived
+  files); `SPECIES_NAME` and `GENOME_VERSION` are log labels. Nothing parses
+  them to infer organism or gene-ID format.
+- `doctor` now compares chromosome names between the genome FASTA and the
+  GFF3 and FAILs on a complete mismatch (the classic `Chr1` vs `chr01` vs `1`
+  problem when switching to rice). Previously this surfaced only at step 05,
+  after the whole nf-core run.
+- Added a worked rice example to both READMEs.
+
+### 4e. conda channel order fix (caused a real run failure)
+- **Bug:** the generated `.condarc` listed `bioconda` before `conda-forge`.
+  nf-core checks this and emits only a WARN, then the run fails much later
+  inside a process — observed as `PHANTOMPEAKQUALTOOLS` failing with
+  `/usr/bin/which: no run_spp.R in (...)` after ~all alignment work was done.
+  run_spp.R comes from the process's conda env, which the solver had built
+  with mismatched cross-channel builds.
+- Channel order corrected to `conda-forge > bioconda > defaults` with
+  `channel_priority: strict`. A stale `.condarc` written by an older
+  ChromaFlow is detected (bioconda first) and rebuilt automatically.
+- Added `--skip-spp` / `SKIP_SPP=true` to skip phantompeakqualtools, which is
+  the most conda-fragile module and only produces the NSC/RSC QC metric.
+- Added `-- <args>` passthrough on `chromaflow run` for arbitrary
+  nextflow/nf-core arguments (`-- --skip_preseq -resume`).
+
+### 4j. MULTIQC / kaleido pin
+- **Bug:** with unpinned dependencies the solver installs kaleido >= 1.0 and
+  python 3.14 into the MultiQC environment. Kaleido 1.0 removed its bundled
+  chromium and requires a system Google Chrome, so MULTIQC fails with
+  `RuntimeError: Kaleido requires Google Chrome to be installed` while
+  exporting static plots — after every analysis process has succeeded.
+- The generated conda config now pins `python=3.12` and
+  `python-kaleido=0.2.1` for the MULTIQC process, with the multiqc version
+  read from the pipeline assets. The `withName` selectors were verified not to
+  over-match MULTIQC_CUSTOM_PEAKS / MULTIQC_CUSTOM_PHANTOMPEAKQUALTOOLS.
+- Added `--skip-multiqc`.
+
+### 4h. conda downloads: mamba actually enabled + retry/mirror options
+- **Bug:** the script exported `NXF_CONDA_USE_MAMBA=true`, but no such
+  Nextflow environment variable exists — the real setting is `conda.useMamba`
+  in a config file. Plain conda had been doing every environment build.
+  conda's downloader aborts the whole environment when a transfer drops
+  (`curl: (18) end of response with N bytes missing`), which is what killed
+  the phantompeakqualtools build at ~12 KB/s. `useMamba` (or
+  `useMicromamba`) is now written into the generated config when available.
+- `.condarc` gained download resilience: `remote_max_retries: 5`,
+  `remote_read_timeout_secs: 600`, `remote_connect_timeout_secs: 30`,
+  `remote_backoff_factor: 2`.
+- `NFCORE_CONDA_MIRROR` now accepts `tuna|bfsu|nju|sjtu|none` or a custom
+  mirror base URL, so a throttling mirror can be swapped without editing code.
+- **Fixed a heredoc bug found in testing:** interpolating a newline-terminated
+  variable immediately before `EOF` meant the terminator was never on its own
+  line, so the first heredoc swallowed the else-branch and no `.condarc` was
+  written at all. The retry keys are now inlined.
+
+### 4g. conda env build timeout — the actual root cause of 4e/4f symptoms
+- **Bug:** nextflow's `conda.createTimeout` defaults to 20 minutes.
+  Building the phantompeakqualtools env (r-base + Bioconductor + boost,
+  >1 GB) exceeds that on a slow link, so conda is killed and the run fails
+  with `Failed to create Conda environment ... status : 120`
+  (plus a Groovy `IOException: Stream closed` from the killed reader thread).
+- **The partial env directory is left behind.** Nextflow decides an
+  environment exists from the directory alone, so the next run reuses the
+  broken one — which is where the earlier `which: no run_spp.R` failure
+  actually came from. The channel-order fix in 4e was correct practice but
+  was *not* the cause of that symptom.
+- Fixes: `conda.createTimeout` set to 3 h (`NFCORE_CONDA_TIMEOUT` to
+  override) in the generated config, and `clean_partial_conda_envs` deletes
+  env dirs lacking `conda-meta/history` before launching.
+- `--no-conda-patch` now only drops the dependency pins; the timeout always
+  applies.
+- Corrected the framing of nf-core's "problem with your Conda configuration"
+  warning: `conda config --show channels` merges system, user and CONDARC
+  files, so it can persist even with a correct project `.condarc`, and module
+  environment.yml files declare their own channels. It is usually noise.
+
+### 4f. conda dependency pins (deeptools / numpy 2.x)
+- **Bug:** under `-profile conda`, DEEPTOOLS_COMPUTEMATRIX fails with
+  `AttributeError: module 'numpy' has no attribute 'NAN'`. nf-core's conda
+  specs pin the tool but not its dependencies, so the solver installs numpy
+  2.x while deeptools 3.5.x still calls `np.NAN` (removed in numpy 2.0).
+  Container mode is unaffected. The old setup_environments.sh header mentioned
+  this as a manual `pip install 'numpy<2.0'` note; it is now handled
+  automatically.
+- Conda mode generates `<OUTPUT_DIR>/.chromaflow/nfcore_conda_patch.config`
+  and passes it with `-c`: pins `numpy=1.26` for `DEEPTOOLS_*` processes and
+  sets `conda.createTimeout` (default 90 min, `NFCORE_CONDA_TIMEOUT` to
+  override). The deeptools version is read from the downloaded pipeline
+  assets so the pin tracks nf-core rather than being hardcoded.
+- Added `--skip-plot-profile` and `--no-conda-patch` escape hatches.
+- **Fixed a bug introduced in 4e:** the stale-`.condarc` detector matched
+  `  - bioconda` anywhere in the first five lines, which is also true of the
+  *correct* file, so it rebuilt and warned on every run. It now compares which
+  channel comes first.
+
+### 4i. QC fallback when phantompeakqualtools is skipped
+- Step 03 already gated its NSC/RSC block on the output directory existing, so
+  `--skip-spp` never broke it — but the log went silent. It now falls back to
+  listing FRiP values found under the results tree and points at
+  plotFingerprint / plotProfile / MultiQC / the IDR pairwise table.
+- Documented in both READMEs what `--skip-spp` actually costs (only NSC/RSC,
+  the QualityTag and the cross-correlation plot; MACS3 estimates its own
+  fragment size so peaks are unchanged) and why IDR is not a substitute:
+  IDR measures replicate agreement, not signal-to-noise, and uniformly poor
+  replicates can agree with each other.
+
+### 4k. Documentation: conda activate instead of mamba activate
+- All docs and hint messages now say `conda activate <env>`. mamba 2.x is a
+  standalone binary whose shell function is installed by `mamba shell init`,
+  separate from `conda init`, so `mamba activate` fails with "running as a
+  subprocess and can't modify the parent shell" on setups that only ran
+  `conda init`. No script ever called activate, so nothing was broken — but
+  the instructions did not work as written for those users.
+
+### 4l. Scientific-notation genome coordinates (step 05 → 06/07)
+- **Bug:** `chromaflow candidates` failed with
+  `ValueError: invalid literal for int() with base 10: '8e+06'`.
+  In `05_peak_annotation.R`, `start(g) - 1` promotes GRanges integer
+  coordinates to double; `write.table` renders doubles with `as.character()`,
+  which uses scientific notation for round numbers, so a gene starting at
+  8,000,000 was written to genes.bed as `8e+06`. Only affects genomes with
+  genes at such coordinates, which is why it surfaced late.
+- Writer fixed at the source: `as.integer(start(g) - 1L)` plus a global
+  `options(scipen = 999)` covering every table the script writes
+  (peak_annotation_full.tsv had the same exposure).
+- Readers made tolerant so existing outputs do not require rerunning step 05:
+  `06_integrate.sh` parses via `int(float(...))` and skips unparseable lines
+  with a warning; `plot_tracks.sh` (both blocks) does the same;
+  `06_signal_deeptools.sh` normalizes with `printf "%d"` in its awk.
+
+### 4m. --peakset consensus: peak_score was silently all zero
+- **Bug:** with `--peakset consensus`, every `peak_score` in the annotation
+  output was 0. nf-core builds `consensus_peaks.bed` with
+  `awk 'FNR>1 {print $1,$2,$3,$4,"0","+"}'` — column 5 is a hardcoded `"0"`.
+  `get_consensus_with_signal` exists to back-fill signalValue from the
+  replicate narrowPeaks, but it required bedtools and fell back to the raw
+  consensus file **silently** when bedtools was missing. `ChromaFlow_R`, the
+  documented environment for `annotate`, does not include bedtools — so the
+  documented workflow hit the silent path.
+- Added `lib/steps/support/consensus_signal.py`: a dependency-free Python
+  back-fill (bisect-based interval overlap, max signalValue per consensus
+  interval), used automatically when bedtools is absent. Verified to match
+  the bedtools result, including half-open boundary semantics.
+- Every fallback path now warns explicitly instead of degrading silently, and
+  a failed back-fill no longer leaves a partial file in the cache location
+  (which would have been reused as valid on the next run).
+- `bedtools` added to the ChromaFlow_R environment recipe; `doctor` now
+  reports which back-fill path is available.
+
+### 4n. annotation gene vs nearest-TSS gene are now distinguished
+- ChIPseeker's `annotation` (feature the peak overlaps, possibly a
+  neighbouring gene) and `geneId` (nearest TSS) can name different genes.
+  Step 06 filtered on the former while reporting the latter, so a peak in
+  gene A's intron that sits 1.4 kb upstream of gene B's TSS was recorded
+  against B but rejected as "Intron" — a real upstream site for B was lost.
+- Step 05 now emits `feature_simple`, `feature_geneId` and
+  `gene_consistent`, and logs how many peaks disagree plus the PROMOTER_UP
+  hint. Step 06 emits `feature_gene` and `pass_reason` in
+  candidate_targets.tsv and reports the mismatch count.
+- New `--max-tss-dist N` / `TARGET_MAX_TSS_DIST`: a peak also passes the
+  position filter when it lies within N bp upstream of geneId's TSS,
+  regardless of what it overlaps. Default 0 (off) so existing results are
+  unchanged. Documented alongside the alternative (widen PROMOTER_UP).
 
 ### 5. Help and documentation
 - `lib/help.sh`: `chromaflow help`, `chromaflow help <command>`,

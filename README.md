@@ -1,563 +1,279 @@
-# ChromaFlow
+# ChromaFlow 1.2.7
 
-**English** · [中文文档 / Chinese README](README.zh-CN.md)
+[中文指南](README.zh-CN.md) · [Offline deployment](docs/OFFLINE.md) · [Downstream commands](docs/DOWNSTREAM.md) · [Motif selection and tracks](docs/SELECTION.md) · [Release notes](CHANGELOG.md)
 
-A downstream analysis framework for ChIP-seq / DAP-seq / ATAC-seq built on top of nf-core pipelines. It completes the evidence chain from raw peaks to **candidate target genes**.
+ChromaFlow wraps nf-core/chipseq 2.1.0 (ChIP-seq and DAP-seq) and nf-core/atacseq 2.1.2, then provides IDR, motif discovery, peak annotation, candidate-gene integration, signal plots, gene tracks and GO exports. Source code, project configuration and analysis outputs live separately.
 
-Organised as software: install the code once, and let each project's own `chromaflow.config` decide where data and results live. The code directory stays clean.
+Version 1.2.7 shares motif filters between candidates and lookup, passes verified
+selections to tracks, fixes CentriMo local/central labels, and sizes dense gene/motif
+tracks automatically. Exact gene IDs and the 1.2.6 annotation policy are preserved.
+See [selection and filtering commands](docs/SELECTION.md) and the
+[downstream guide](docs/DOWNSTREAM.md).
 
----
+## Install the software
 
-## Contents
+Use Linux or WSL2 Ubuntu, Bash, Python 3 and standard GNU command-line tools. Prepare/download Linux containers on Linux/WSL, not in Windows PowerShell. In WSL, `D:\biosoft` is `/mnt/d/biosoft`.
 
-- [Design: code / config / runtime](#design-code--config--runtime)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Help system](#help-system)
-- [Core concept: peakset](#core-concept-peakset)
-- [Command overview](#command-overview)
-- [Pipeline in detail](#pipeline-in-detail)
-- [Optional steps and how to skip them](#optional-steps-and-how-to-skip-them)
-- [Sample record file and read pairing](#sample-record-file-and-read-pairing)
-- [Configuration and automatic file discovery](#configuration-and-automatic-file-discovery)
-- [Recipes](#recipes)
-- [Output guide](#output-guide)
-- [Environments](#environments)
-- [Quality assessment and interpretation](#quality-assessment-and-interpretation)
-- [Adapting to other species](#adapting-to-other-species)
-
----
-
-## Design: code / config / runtime
-
-| Layer | Contents | Location |
-|---|---|---|
-| ① Software | CLI, lib, steps, templates | **this repository** (clone once, add to PATH) |
-| ② Project config | species parameters, I/O paths | one `chromaflow.config` per dataset |
-| ③ Runtime I/O | fastq, references, results, logs | determined by `OUTPUT_DIR` in the config |
-
-The repository contains **code only** — no `results/`, `reference/` or `logs/`. Switching datasets means copying a config and editing paths; the code directory never changes.
-
-```
-ChromaFlow/
-├── bin/chromaflow              # unified CLI entry point
-├── lib/
-│   ├── common.sh               # config parsing, path resolution, peakset, logging
-│   ├── help.sh                 # `chromaflow help [command]`
-│   └── steps/                  # analysis steps
-│       ├── 00_prepare_reference.sh   00b_normalize_gff.sh
-│       ├── normalize_gff.py          make_samplesheet.py
-│       ├── 01_make_samplesheet.sh    02_run_nfcore.sh
-│       ├── 03_idr_analysis.sh        04_meme_motif.sh
-│       ├── 05_peak_annotation.R/.sh  06_integrate.sh
-│       ├── 07_gene_tracks.sh         08_go_analysis.sh
-│       ├── 09_lookup.sh              plot_tracks.sh  ← plotting core
-│       └── support/
-├── templates/                  # project templates (config + samples_*)
-└── setup_environments.sh       # conda/mamba environment installer
-```
-
----
-
-## Installation
+Install the current repository version:
 
 ```bash
-git clone <repo> ~/software/ChromaFlow
-export CHROMAFLOW_HOME=~/software/ChromaFlow
-export PATH="$CHROMAFLOW_HOME/bin:$PATH"      # add to ~/.bashrc
-
-bash $CHROMAFLOW_HOME/setup_environments.sh          # core conda environments
-WITH_AGAT=true bash $CHROMAFLOW_HOME/setup_environments.sh   # optional AGAT env
-SKIP_R=true    bash $CHROMAFLOW_HOME/setup_environments.sh   # skip R (use annotate-py)
-```
-
----
-
-## Quick start
-
-```bash
-# 1. Create a project
-chromaflow init /data/projects/MyChIP --type chipseq
-cd /data/projects/MyChIP
-vim chromaflow.config        # species + paths to the files you already have
-vim samples_chipseq.txt      # samples and fastq locations
-
-# 2. Reference (optional — skip if you already have genome/GTF/chrom.sizes)
-mamba activate ChromaFlow_ref
-chromaflow reference          # 00  genome / GTF / chrom.sizes
-chromaflow normalize-gff      # 00b optional, improves annotation accuracy
-chromaflow doctor             # self-check
-
-# 3. Main pipeline
-chromaflow samplesheet        # 01  build the nf-core samplesheet
-mamba activate nfcore_env
-chromaflow run                # 02  run nf-core/chipseq
-
-# 4. Downstream (the core value)
-mamba activate ChromaFlow_idr        && chromaflow idr        # 03 reproducible peaks
-mamba activate ChromaFlow_motif      && chromaflow motif      # 04 motif discovery
-mamba activate ChromaFlow_R          && chromaflow annotate   # 05 peak annotation
-mamba activate ChromaFlow_downstream && chromaflow candidates # 06 candidate targets
-```
-
-Global options (available on every command):
-
-| Option | Effect |
-|---|---|
-| `-c, --config <file>` | Project config (default `$CHROMAFLOW_CONFIG` > `./chromaflow.config`) |
-| `-t, --type <type>` | `chipseq` (default) / `atacseq` / `dapseq` |
-| `-o, --outdir <dir>` | Redirect **this step's** output to a directory |
-| `--peakset <spec>` | Which peak set downstream uses (see below) |
-| `--profile <name>` | nf-core execution mode for `run`: `singularity` (default) / `apptainer` / `docker` / `podman` / `conda` / `mamba` |
-| `-h, --help` | Help for the current command |
-
----
-
-## Help system
-
-```bash
-chromaflow help                 # command overview
-chromaflow help <command>       # details for one command
-chromaflow <command> --help     # same thing
-chromaflow help config          # what belongs in chromaflow.config
-chromaflow help samples         # sample record format + read pairing rules
-chromaflow help peakset         # peakset semantics
-chromaflow help envs            # which conda env each step needs
+mkdir -p "$HOME/biosoft"
+git clone https://github.com/ChenFeiyu-hub/ChromaFlow.git "$HOME/biosoft/ChromaFlow"
+export CHROMAFLOW_HOME="$HOME/biosoft/ChromaFlow"
+export PATH="$CHROMAFLOW_HOME/bin:$PATH"
+hash -r
 chromaflow version
 ```
 
----
-
-## Core concept: peakset
-
-Every downstream step (04/05/06/07/09) answers the same question first: **which peaks?** That is controlled by `--peakset`, which is given **on the command line and never stored in the config**, so alternatives are easy to compare.
-
-| spec | Meaning | Output dir suffix |
-|---|---|---|
-| `idr` (default) | reproducible peaks at IDR < 0.01 | none |
-| `idr:0.05` / `idr:0.1` | looser IDR thresholds | `_idr0.05` |
-| `consensus` | skip IDR, use the nf-core consensus set (signalValue back-filled) | `_consensus` |
-| `<file path>` | any custom peak file | `_custom` |
-
-Different peaksets write to **separate suffixed directories** (`annotation_consensus/`, `candidates_consensus/` …) so results coexist without overwriting.
-
-> **Important:** to analyse one peak set, run `motif → annotate → candidates → lookup` with the **same `--peakset`**. Motifs are derived from a specific set of peak sequences; mixing peaksets between step 04 and 06 means FIMO hits will not line up with the annotated peaks.
+Record `git -C "$CHROMAFLOW_HOME" rev-parse HEAD` to identify the exact revision.
+For an offline server, transfer a checked-out copy or an available release package.
+If you already have the versioned ChromaFlow archive and its checksum, install it with:
 
 ```bash
-# strict route (reproducible peaks)
-chromaflow motif && chromaflow annotate && chromaflow candidates
-
-# permissive route (when replicate agreement is poor)
-chromaflow motif      --peakset consensus
-chromaflow annotate   --peakset consensus
-chromaflow candidates --peakset consensus
+cd ~/nfcore-upload   # directory containing the transferred release
+sha256sum -c ChromaFlow-1.2.7.tar.gz.sha256
+mkdir -p "$HOME/biosoft/ChromaFlow-1.2.7"
+tar -xzf ChromaFlow-1.2.7.tar.gz \
+  -C "$HOME/biosoft/ChromaFlow-1.2.7" --strip-components=1
+export CHROMAFLOW_HOME="$HOME/biosoft/ChromaFlow-1.2.7"
+export PATH="$CHROMAFLOW_HOME/bin:$PATH"
+chromaflow version
 ```
 
----
+Install into a new version directory. Add the two `export` lines to your shell startup file after checking the release. Existing projects continue to use their own config; do not replace a working project config with the template.
 
-## Command overview
-
-| Command | Step | Environment |
-|---|---|---|
-| `chromaflow init` | project skeleton + config template | — |
-| `chromaflow reference` | 00 reference preparation *(optional)* | `ChromaFlow_ref` |
-| `chromaflow normalize-gff` | 00b GFF3 normalization *(optional)* | `ChromaFlow_ref` / `ChromaFlow_agat` |
-| `chromaflow samplesheet` | 01 build nf-core samplesheet | — |
-| `chromaflow run` | 02 run the nf-core pipeline | `nfcore_env` |
-| `chromaflow idr` | 03 IDR reproducibility | `ChromaFlow_idr` |
-| `chromaflow motif` | 04 MEME-ChIP motif discovery | `ChromaFlow_motif` |
-| `chromaflow annotate` | 05 peak annotation (ChIPseeker) | `ChromaFlow_R` |
-| `chromaflow annotate-py` | 05 alternative: pure Python | `ChromaFlow_ref` |
-| `chromaflow candidates` | 06 candidate target integration | `ChromaFlow_downstream` |
-| `chromaflow lookup` | 09 prior-gene binding lookup | `ChromaFlow_downstream` |
-| `chromaflow tracks` | 07 single-gene browser tracks | `ChromaFlow_downstream` |
-| `chromaflow signal` | *(optional)* deepTools aggregate profiles | `ChromaFlow_downstream` |
-| `chromaflow go-prep` / `go-plot` | 08 GO export / visualization | `ChromaFlow_ref` |
-| `chromaflow spacing` | *(support)* motif spacing analysis | `ChromaFlow_ref` |
-| `chromaflow doctor` | environment and file self-check | any |
-
----
-
-## Pipeline in detail
-
-### 00 Reference preparation *(optional)*
-Assembles genome FASTA, GTF and chrom.sizes, and can merge organelle genomes (chloroplast / mitochondrion) into the nuclear genome so organelle-derived false peaks are identifiable.
-
-Source files may be compressed or not — **compression is detected from the file's magic bytes, not the extension**. Plain `.fa` / `.gff3` files are used in place with no copy; gzip/bgzip, bzip2, xz, zstd and zip are decompressed once into the reference directory and reused afterwards; a file that is gzipped despite being named `.gff3` (a common download artefact) is still handled correctly, and directory auto-detection never picks a compressed file for a step that needs plain text.
-
-Everything this step produces is **registered in a manifest** (`<OUTPUT_DIR>/.chromaflow/reference.manifest`) and picked up automatically later — you never copy generated paths back into the config. If you already have a genome, GTF and chrom.sizes, just place them in `REFERENCE_DIR` and skip the step entirely.
-
-### 00b GFF normalization *(optional)*
-GFF3 files from Phytozome and similar sources may **lack `exon` rows** or use inconsistent UTR naming, which makes the gene model incomplete and breaks ChIPseeker's UTR/exon/intron classification (typical symptom: 0% UTR in the annotation pie chart).
+## Choose an environment plan
 
 ```bash
-chromaflow normalize-gff                    # auto: AGAT if present, else built-in
-chromaflow normalize-gff --engine builtin   # force the dependency-free engine
-chromaflow normalize-gff --engine agat      # force AGAT
+# Inspect first; no packages or environments are changed.
+chromaflow setup --mode offline --components runtime --dry-run
+
+# Choose the runtime appropriate to this computer:
+chromaflow setup --mode offline --components runtime
+# OR, on a connected Linux/WSL bundle preparation computer:
+chromaflow setup --mode prepare --components runtime
+# OR, for online execution using nf-core's Conda profile:
+chromaflow setup --mode conda --components runtime
+
+# Optional, independent ChromaFlow analysis environments:
+chromaflow setup --components downstream
+# Options: --skip-r, --with-agat, --solver mamba|micromamba|conda
 ```
 
-AGAT is powerful but its Perl dependency tree frequently conflicts during environment solving, so it is **installed separately and optionally**. Without it, the built-in Python normalizer adds exons from CDS, infers 5'/3' UTRs, synthesizes missing gene features and sorts the output. Skipping this step entirely is also fine — annotation falls back to the plain GFF3 and only warns.
-
-### Measured values: genome size, read length, GC
-
-These three used to be hand-entered constants in the config. They are now measured, because a hand-entered value is a value nobody re-checks when the genome or the sequencing run changes.
-
-| Value | Measured by | How | Actually used for |
+| Mode | Runtime environment | Included packages | Used for |
 |---|---|---|---|
-| `MACS_GSIZE` | `reference` (00) | khmer `unique-kmers.py -k <read length>` — the command the old logs asked you to run manually | MACS's Poisson background, λ = N·d/gsize |
-| `READ_LENGTH` | `samplesheet` (01) | samples 2000 reads per fastq, takes the maximum | only used by nf-core to *derive* the genome size when `--macs_gsize` is absent |
-| `GENOME_GC` | `reference` (00) | one pass over the FASTA | informational only — see the note below |
+| `offline` (default) | `ChromaFlow_runtime` | Python, Java | Run transferred container bundles |
+| `prepare` | `nfcore_env` | Python, Java, nf-core/tools 3.3.2 | Download and package offline bundles |
+| `conda` | `nfcore_env` | Python, Java, Nextflow 25.10.4 | Online nf-core Conda execution |
 
-Results are written to `<OUTPUT_DIR>/.chromaflow/derived.env`, **not back into your config**:
+`--components all` is the default; use `runtime` for a minimal installation. Existing named environments are kept, not updated or deleted. If reusing `nfcore_env` for a different purpose, check that the required tools are present. Apptainer/Singularity is a system prerequisite and is not installed by this script.
 
+**Offline mode describes nf-core execution. The Conda environment installer still needs package access.** A workflow bundle includes Nextflow, plugins, workflow code/configuration and container images. It excludes reference genomes, reads, motif databases and ChromaFlow's downstream environments. Reuse working downstream environments on an offline server, or provision them separately on a compatible Linux system.
+
+## Prepare and transfer both nf-core bundles
+
+No separate manual `nf-core pipelines download` or plugin-install commands are needed:
+
+```bash
+conda activate nfcore_env  # created with --mode prepare
+chromaflow offline prepare --type chipseq --bundle "$HOME/nfcore-offline/chipseq-2.1.0"
+chromaflow offline prepare --type atacseq --bundle "$HOME/nfcore-offline/atacseq-2.1.2"
+chromaflow offline check --bundle "$HOME/nfcore-offline/chipseq-2.1.0" --verify --runtime-check
+chromaflow offline check --bundle "$HOME/nfcore-offline/atacseq-2.1.2" --verify --runtime-check
+chromaflow offline pack --bundle "$HOME/nfcore-offline/chipseq-2.1.0" --archive "$HOME/chipseq-2.1.0.tar"
+chromaflow offline pack --bundle "$HOME/nfcore-offline/atacseq-2.1.2" --archive "$HOME/atacseq-2.1.2.tar"
 ```
-config      = what you declare   (always wins; setting a value disables its measurement)
-derived.env = what was measured  (regenerated when the input changes)
+
+Transfer the two archives, their `.sha256` files and the ChromaFlow release. Follow [the deployment guide](docs/OFFLINE.md) for shared `/opt` installation, target-side validation, permissions, project configuration, troubleshooting and version upgrades. DAP-seq shares the chipseq bundle. Existing valid bundles for these versions can be reused after upgrading ChromaFlow.
+
+## Start a project
+
+```bash
+chromaflow init "$HOME/projects/MyChIP" --type chipseq
+cd "$HOME/projects/MyChIP"
+# Edit chromaflow.config and samples_chipseq.txt before continuing.
+conda activate ChromaFlow_ref
+chromaflow samplesheet --type chipseq --strict
+chromaflow reference
+chromaflow normalize-gff --engine builtin  # when annotation needs normalization
+chromaflow reference                     # refresh GTF after a changed annotation
+chromaflow doctor --type chipseq
+
+conda activate ChromaFlow_runtime
+chromaflow run --type chipseq --offline \
+  --bundle /opt/chromaflow/bundles/chipseq-2.1.0 --dry-run
+chromaflow run --type chipseq --offline \
+  --bundle /opt/chromaflow/bundles/chipseq-2.1.0 --yes
 ```
 
-This is the same separation as the reference manifest. The config stays a hand-written declaration of intent that can live in git without a script rewriting it under you, and the measured values are scoped to the outputs they describe, so deleting `outputs/` invalidates them correctly. If you nevertheless want them archived in the config, `chromaflow reference --write-config` appends them as a delimited, idempotent block (with a backup).
+The template requires your species prefix and source FASTA/GFF3. The species label never determines gene-ID parsing. Leave `MACS_GSIZE` and `READ_LENGTH` unset to use measured values. `samplesheet` measures read length; `reference` can estimate effective genome size with unique k-mers. Derived values and reference paths are recorded under `<OUTPUT_DIR>/.chromaflow/`. Explicit config values take precedence, including old explicit GFF/GTF paths.
 
-Measurement is cached against a signature of the genome file and `k`, so it runs once; `--force` re-measures and `--no-measure` skips it.
+The default output anchor is `<PROJECT_DIR>/outputs`; set `OUTPUT_DIR="${PROJECT_DIR}"` to place `results/`, `logs/`, `samplesheets/` and `work/` directly under the project. Reference preparation and normalization are unnecessary when the project already has validated references. Normalization validation and downstream GTF/TxDb acceptance are separate checks; see [GFF normalization](GFF_NORMALIZATION.md).
 
-**If khmer is unavailable**, the fallback is a non-N base count (an upper bound, ~5–10% high), and step 02 can instead omit `--macs_gsize` and pass `--read_length` so that nf-core computes the size internally — <cite index="5-1">nf-core/chipseq runs the same khmer tool in its own `KHMER_UNIQUEKMERS` process when the size is not supplied</cite>. Either way nothing has to be entered by hand.
+## Compare IDR and consensus downstream analyses
 
-**Do these numbers actually matter?**
+`--peakset idr` selects the IDR 0.01 set. `--peakset consensus` uses nf-core consensus peaks without IDR filtering. Neither requires rerunning nf-core. Run IDR once for the former, then use the same peakset throughout each downstream branch:
 
-- `MACS_GSIZE` is real but forgiving. It scales the Poisson background, so an error changes p-values slightly. A few percent — for example a placeholder 100,000,000 against a measured 103,854,640 for *Chlamydomonas*, a 3.7% difference — will not visibly move the peak list. Being wrong by a factor of two would.
-- `READ_LENGTH` is inert whenever `MACS_GSIZE` is supplied: <cite index="7-1">nf-core only uses it to calculate the MACS genome size when `--macs_gsize` isn't provided</cite>. It is measured because it is nearly free and it keeps the k-mer size honest.
-- `GC_CONTENT` has been **removed**. It was never used for anything: step 04 built its background model with `fasta-get-markov`, which estimates base and dinucleotide frequencies from the actual sequence, and the config value only appeared in a log line — which meant the log confidently printed whatever number you had typed, regardless of the genome. Step 04 now reports the GC read back from the model it actually used.
+```bash
+conda activate ChromaFlow_idr
+chromaflow idr --type chipseq --min-pairs 1
 
-### 01–02 Samplesheet and nf-core
-`samplesheet` builds the nf-core input table from your sample record file (see [below](#sample-record-file-and-read-pairing)); `run` invokes nf-core/chipseq (or atacseq), producing BAM, bigWig, MACS peaks and consensus peaks.
+for PEAKSET in idr consensus; do
+  conda activate ChromaFlow_R
+  chromaflow annotate --type chipseq --peakset "$PEAKSET"
+  conda activate ChromaFlow_motif
+  chromaflow motif --type chipseq --peakset "$PEAKSET"
+  conda activate ChromaFlow_downstream
+  chromaflow candidates --type chipseq --peakset "$PEAKSET"
+  chromaflow signal --type chipseq --peakset "$PEAKSET"
+  conda activate ChromaFlow_ref
+  chromaflow go-prep --type chipseq --peakset "$PEAKSET" --set promoter
+done
+```
 
-**Execution mode is controlled by `NFCORE_PROFILE`** (command line `--profile` wins over the config). It sets nextflow's `-profile` *and* selects which execution path `chromaflow run` takes:
+This IDR wrapper accepts a single biological condition with at least two replicate peak files. It rejects mixed conditions instead of comparing unrelated samples. Missing/empty requested IDR sets fail explicitly. Use `--peakset idr:0.05` to choose a different computed threshold deliberately. Full commands and interpretation limits are in [DOWNSTREAM.md](docs/DOWNSTREAM.md).
 
-| Value | Mode | Notes |
+IDR is optional. For a consensus-only analysis, skip `idr` and run the downstream
+commands with `--peakset consensus`. Set `DEFAULT_PEAKSET=consensus` in the project
+config to omit that repeated option; explicit `--peakset` always takes precedence.
+The template default remains `idr`.
+
+## Annotate, select candidate genes and plot the same evidence
+
+The project config controls annotation and downstream location selection separately:
+
+```bash
+# Example project settings; choose the promoter window for your analysis.
+DEFAULT_PEAKSET=consensus
+PROMOTER_UP=3000
+PROMOTER_DOWN=0
+TARGET_FEATURES="Promoter,5' UTR,1st Exon"
+TARGET_MAX_TSS_DIST=0
+FIMO_PVAL=1e-4
+```
+
+`PROMOTER_UP/DOWN` define the strand-relative inclusive TSS window. ChIPseeker's
+priority is Promoter > 5′ UTR > 3′ UTR > Exon > Intron > Downstream > Intergenic;
+feature classification and nearest-TSS gene assignment are different fields.
+`TARGET_FEATURES` selects accepted categories afterwards. The optional upstream
+distance rescue applies to the already assigned gene and is disabled with zero.
+Changing the promoter window requires rerunning annotation.
+
+The built-in promoter audit also reports **every peak overlapping the whole
+configured promoter**, including peaks assigned to other genes. Inspect
+`promoter_peak_overlaps.tsv`, `promoter_peak_summary.tsv`, and `annotation_policy.json`.
+This audit adds regional evidence without reassigning peaks or promoting candidates.
+
+After `annotate` and `motif` have completed for the same branch:
+
+```bash
+conda activate ChromaFlow_downstream
+chromaflow candidates --type chipseq --peakset consensus
+chromaflow lookup --type chipseq --peakset consensus \
+  --gene-list genes_of_interest.txt --level candidate \
+  --outdir results/downstream/chipseq/lookup_selected
+chromaflow tracks --type chipseq --peakset consensus \
+  --selection results/downstream/chipseq/lookup_selected \
+  --outdir results/downstream/chipseq/tracks_selected
+
+# Optional: select a specific model and query/plot in one command.
+chromaflow lookup --type chipseq --peakset consensus \
+  --gene-list genes_of_interest.txt --level candidate --motif MEME-4 --plot \
+  --outdir results/downstream/chipseq/lookup_MEME4
+```
+
+Lookup previews exact query/annotation IDs and asks **y/N**. It does not strip
+suffixes or infer aliases; `--yes` explicitly accepts exact matching for unattended
+runs. `--level all` (default) retains all query rows and plots exactly matched genes;
+`in_target` selects accepted-location evidence; `candidate` also requires a passing
+motif hit. `--plot` follows that level. Unmatched IDs remain in `id_check.tsv`.
+
+Candidates and lookup share these optional filters:
+
+| Option | Config | Meaning |
 |---|---|---|
-| `singularity` (default) | container | images pulled automatically; best reproducibility |
-| `apptainer` | container | for Apptainer 1.x installations |
-| `docker` / `podman` | container | those engines instead |
-| `conda` / `mamba` | conda | one env per process, ~30–60 min on first run; for networks where image pulls fail |
+| `--motif MEME-4,MEME-7` | `MOTIF_IDS` | Exact run-local model labels or raw IDs |
+| `--pval 1e-5` | `FIMO_PVAL` | Site-level FIMO p-value maximum; default 1e-4 |
+| `--qval 0.05` | `FIMO_QVAL` | Site-level FIMO q-value maximum |
+| `--motif-evalue 0.05` | `MOTIF_EVALUE_MAX` | Discovery model E-value maximum |
+| `--centrimo-evalue 0.05` | `CENTRIMO_EVALUE_MAX` | Positional-enrichment E-value maximum |
+| `--min-signal 2` | CLI default 0 | Minimum peak signal score |
 
-```bash
-chromaflow run --profile conda      # one-off
-NFCORE_PROFILE=conda                # or make it the project default in the config
+Optional config filters are empty/disabled by default. Filters are applied to all
+peaks before selecting each gene's best evidence. MEME-4 is not necessarily
+`fimo_out_4`; selecting an unscanned model or requesting missing statistics fails
+explicitly. These commands filter existing FIMO output, not unscanned DNA.
+
+`selected_genes.txt`, `selected_evidence.tsv`, `motif_catalog.tsv`, and `selection.json`
+record the selection and its provenance. `tracks --selection` checks file hashes,
+branch and promoter settings, then uses the saved genes/motif hits while retaining
+all regional peaks and neighboring genes. `candidates --plot` also uses its selected
+genes. The full `candidate_targets.tsv` includes failing peaks: use the selected
+list for candidate-only plots. The legacy `high_confidence_genes.txt` filename is an
+alias for computational candidates, not a claim of experimental validation.
+
+CentriMo reports local/central/unknown mode and passes-threshold/above-threshold/
+not-reported status; its display threshold is E≤0.05 and does not filter candidates
+unless explicitly requested. Significant local enrichment is not automatically
+central enrichment. Track heights adapt to transcript/motif counts; set
+`TRACK_GENE_HEIGHT` and `TRACK_MOTIF_HEIGHT` to `auto` or a positive height in cm.
+Peak labels preserve three significant digits. Full semantics and examples are in
+[Selection and tracks](docs/SELECTION.md).
+
+## Outputs and logs
+
+```text
+<OUTPUT_DIR>/
+  results/chipseq/                         nf-core results
+  results/downstream/chipseq/
+    idr/                                  pairwise IDR and threshold sets
+    annotation/   annotation_consensus/   separate branches
+    motif/        motif_consensus/
+    signal/       signal_consensus/       created when signal is requested
+    go/           go_consensus/
+    candidates/   candidates_consensus/
+    lookup/       lookup_consensus/
+    tracks/       tracks_consensus/
+  logs/downstream/chipseq/
+    <timestamp>_<command>_<peakset>_<unique>.log
 ```
 
-Combinations such as `NFCORE_PROFILE="singularity,test"` are passed through as-is. Image cache: `$OUTPUT_DIR/.singularity_cache` (exported as both `NXF_SINGULARITY_CACHEDIR` and `NXF_APPTAINER_CACHEDIR`). Conda env cache: `$OUTPUT_DIR/.conda_envs`. Conda mode rewrites channels to a Tsinghua mirror by default — set `NFCORE_CONDA_MIRROR=none` to keep your own channel configuration.
+Every downstream command through `chromaflow` automatically records combined terminal stdout/stderr, command, version, config path and final exit code. You do not need to add `tee`. Each invocation gets a new log; `-o` changes that step's results directory, not the project log directory. Main nf-core and reference logs retain their existing locations under `logs/`. Argument/config-resolution errors that occur before a project can be identified are printed to the terminal. User interruption can leave a partial log without an end marker.
 
-### 03 IDR reproducibility
-Runs IDR on every replicate pair and keeps peaks that are **statistically reproducible**. Output has 8 columns: `chr start end name signalValue strand globalIDR n_pairs`.
+Software-generated messages, help and plot labels are English. User paths, gene names and raw biological data are preserved. Existing logs are not rewritten. Calling internal scripts directly bypasses the unified CLI logger.
 
-```bash
-chromaflow idr                          # default: union — any passing pair keeps the peak
-chromaflow idr --min-pairs 2            # keep only peaks supported by ≥2 pairs
-chromaflow idr --exclude-rep REP1       # rerun without a replicate
-chromaflow idr --exclude-rep REP1,REP3
-```
-
-- **`--min-pairs N`**: `n_pairs` records how many pairs support each peak. With ≥3 replicates, `--min-pairs 2` is a safer way to tighten than dropping a replicate — no data is discarded, the evidence bar is simply raised.
-- **`--exclude-rep`**: use it to test the impact of a suspicious replicate empirically (**read the pairwise table in the log first**).
-
-### 04 MEME-ChIP motif discovery
-De novo motif discovery on summit ±100 bp, Tomtom comparison against a known motif database, CentriMo central enrichment and a genome-wide FIMO scan.
-
-- Uses **all peak sequences** (no top-N truncation). `MEME_SEARCHSIZE=0` means unlimited; runtime grows roughly quadratically, so set e.g. `MEME_SEARCHSIZE=200000` when sequences are numerous.
-- Output directories carry the peakset suffix: `motif/`, `motif_consensus/` …
-- Gaps in MEME numbering (MEME-1, 3, 4) are normal: MEME-ChIP clusters and filters redundant motifs, and filtered ones produce no FIMO output.
-
-### 05 Peak annotation
-`annotatePeak` assigns each peak to a gene and classifies its genomic feature.
-
-- `PROMOTER_UP` / `PROMOTER_DOWN` map directly to ChIPseeker's `tssRegion=c(-UP,+DOWN)` and thus **define the "Promoter" slice of the pie chart**.
-- ChIPseeker classifies by priority `Promoter > 5'UTR > 3'UTR > Exon > Intron > Downstream > Intergenic`. If the promoter window extends downstream of the TSS, the front of the 5'UTR is absorbed by "Promoter" — that is by design.
-- Each peak is assigned to **one** gene (nearest TSS); downstream steps always use the `geneId` column.
-
-Produces `peak_annotation_full.tsv`, `genes.bed`, `background_universe.txt`, the annotation pie chart, TSS distance plots and more. `annotate-py` is an R-free alternative with the same output contract.
-
-### 06 Candidate target integration (04 motifs × 05 annotation)
-Maps FIMO motif hits (genomic coordinates) back onto peaks and intersects them with the annotated positional features:
-
-> **candidate = acceptable position (`TARGET_FEATURES`) + FIMO motif inside the peak**
+`annotation*/dist_to_tss.png` now shows explicit upstream/downstream distance bins, percentages and counts. `dist_to_tss.tsv` records the bin boundaries and denominator. The plot summarizes annotation distances; it does not measure enrichment against a genomic background. It can be redrawn from an existing ChIPseeker table without repeating annotation:
 
 ```bash
-chromaflow candidates
-chromaflow candidates --features "Promoter,1st Intron,Distal Intergenic" --pval 1e-4
+Rscript "$CHROMAFLOW_HOME/lib/steps/plot_tss.R" \
+  results/downstream/chipseq/annotation/peak_annotation_full.tsv \
+  results/downstream/chipseq/annotation/tss_plot_v1.2.7
 ```
 
-Produces `candidate_targets.tsv` (per peak: coordinates, per-motif counts, verdict), per-motif `motif_<name>_hits.tsv` / `_genes.txt`, `motif_summary.tsv` (with CentriMo), `high_confidence_genes.txt` and `go/`.
+## Command reference
 
-### 07 Single-gene browser tracks
-```bash
-chromaflow tracks --genes GENE1,GENE2
-chromaflow tracks --gene-list mylist.txt [--outdir DIR]
-```
-
-- **Gene column auto-detection**: a header containing `gene_id` / `Gene` / `Genes` / `gene_name` / `id` is used and skipped, so `query_binding.tsv`, `candidate_targets.tsv` and `candidate_genes.txt` can be passed directly; without a header the first column is used.
-- **Peak labels carry signalValue** (e.g. `IDR_peak_1 (sig=6299)`) for quantitative comparison.
-- **A log2(ChIP/Input) difference track is always overlaid** (deepTools: replicates merged with `bigwigAverage`, then `bigwigCompare`). It has its own y-axis; positive = enriched (red), negative = below background (blue), flat = indistinguishable from background.
-
-> Coverage track y-values (e.g. 0–6) are normalized sequencing depth, whereas signalValue is MACS fold enrichment (can reach thousands). They are **different scales** — do not judge enrichment strength by peak height.
-
-Plotting lives in `lib/steps/plot_tracks.sh` (the STYLE block at the top controls colours, heights, fonts, DPI). Both `tracks` and `lookup --plot` call it, so **visual tweaks happen in one place**.
-
-### 08 GO enrichment
-`go-prep` exports foreground and background gene lists for external tools (agriGO, g:Profiler …); `go-plot` turns the returned results into a bubble chart.
-
-### 09 Prior-gene lookup — independent evidence breakdown
-Takes a list of genes you care about (for example phosphate-starvation genes) and evaluates them **independently** from the 05 annotation and 04 FIMO output — it does **not** depend on the candidate table, so it still works when `candidates` did not surface what you expected.
-
-```bash
-chromaflow lookup --gene-list phosphate_genes.txt
-chromaflow lookup --gene-list phosphate_genes.txt --peakset consensus --plot
-chromaflow lookup --gene-list phosphate_genes.txt --min-signal 50 --level candidate
-```
-
-`query_binding.tsv` is an **evidence breakdown**; the `tier` column explains why each gene is (or is not) a candidate:
-
-| tier | Meaning |
+| Command | Purpose |
 |---|---|
-| `candidate` | right position + motif (highest confidence) |
-| `in_target` | peak at an acceptable position, but **no motif support** |
-| `motif_only` | motif present, but **position not acceptable** (e.g. distal) |
-| `peak_only` | peak present, neither position nor motif criteria met |
-| `none` | no peak |
+| `setup`, `init`, `doctor` | Environments, project creation, checks |
+| `offline prepare/check/pack` | Build, verify and package local nf-core bundles |
+| `samplesheet`, `reference`, `normalize-gff`, `run` | Inputs, reference preparation, nf-core |
+| `idr`, `motif`, `annotate`, `annotate-py` | Reproducibility, motifs, annotation |
+| `candidates`, `lookup`, `tracks` | Candidate integration, prior-gene queries, tracks |
+| `signal`, `go-prep`, `go-plot`, `spacing` | Signal plots, GO export/plots, motif spacing |
 
-It also reports three-tier statistics and an **ID sanity check**, distinguishing "gene exists but has no peak" (a real biological result) from "ID not present in the annotation" (usually an ID-format or species mismatch), the latter written to `id_not_found.txt`.
+Use `chromaflow help <command>`, `chromaflow help config`, `chromaflow help samples` and `chromaflow help envs`. `annotate-py` is a simpler alternative and does not reproduce every ChIPseeker field or R plot; use the R path for the full annotation workflow.
 
----
-
-## Optional steps and how to skip them
-
-`reference`, `normalize-gff`, `signal` and `spacing` are optional. Skipping them never breaks the main path.
-
-| Situation | What to do | Consequence |
-|---|---|---|
-| No suitable organelle genome | `chromaflow reference --skip-organelle`, or set `ORGANELLE_SOURCES=()` / `SKIP_ORGANELLE=true` | Nuclear genome only; everything else identical |
-| Some organelle files missing | nothing — they are skipped with a warning | Add `--strict` if you would rather fail |
-| Genome/GTF/chrom.sizes already prepared | skip `reference` entirely, put the files in `REFERENCE_DIR` | They are auto-detected |
-| AGAT will not install | run `normalize-gff` anyway | Falls back to the built-in Python engine |
-| No need for GFF normalization at all | skip `normalize-gff` | `annotate` uses the plain GFF3 and warns if `exon` rows are absent |
-| No GTF needed (downstream only) | `chromaflow reference --skip-gtf` | Only step 02 requires a GTF |
-| No R available | use `chromaflow annotate-py` | Same output contract; 06–09 unaffected |
-| No motif database | leave `MEME_DB` empty | Tomtom comparison skipped, de novo discovery unaffected |
-| No annotation_info table | leave `ANNOTATION_INFO` empty | GO export limited, everything else unaffected |
-
-`chromaflow doctor` reports optional features as `[INFO]` / `[SKIP]` rather than failures, so its summary reflects what actually blocks you.
-
----
-
-## Sample record file and read pairing
-
-Located automatically: `--samples <file>` > `SAMPLES_FILE` in the config > `<PROJECT_DIR|INPUT_DIR>/samples_<type>.{txt,tsv,csv}` > `samples.{txt,tsv,csv}`.
-
-Three accepted layouts (TAB, comma or whitespace separated):
-
-```
-# 1) header-based (recommended) — any column order, optional columns
-sample_id   antibody   control_id   replicate   fastq_path
-Dof_ChIP    crDOF      Input        1           /data/raw/Dof_rep1
-Input       -          -            1           /data/raw/input
-
-# 2) positional (legacy, still supported)
-Dof_ChIP    crDOF      Input        1           /data/raw/Dof_rep1
-
-# 3) explicit read files (skips pairing)
-sample_id   replicate  fastq_1                  fastq_2
-Dof_ChIP    1          /data/raw/A_1.fq.gz      /data/raw/A_2.fq.gz
-```
-
-Column aliases (case-insensitive): `sample|name`, `ab|target`, `control|input`, `rep`, `fastq|path|dir`, `r1|read1`, `r2|read2`.
-
-**Read pairing is inferred from the right-most mate token in the filename**, so there is no fixed suffix list to maintain. Covered out of the box:
-
-```
-_1/_2   _R1/_R2   .1/.2   -1/-2   _R1_001/_R2_001   _good_1/_good_2
-_clean_1/_clean_2   _val_1/_val_2   _1P/_2P   sampleR1/sampleR2
-```
-
-Multi-lane files produce multiple rows for the same sample. Files whose mate is absent are treated as single-end with a warning. Names such as `sample_rep1` / `sample_rep2` are **not** mistaken for mates.
-
-For unusual naming schemes, override the detection (`{R}` is replaced by 1 and 2):
+## Validation
 
 ```bash
-# in the samples file
-#@ pair_pattern: _good_{R}.fq.gz
-#@ single_end: true
-
-# in chromaflow.config
-FASTQ_PAIR_PATTERN="_R{R}_001.fastq.gz"
-FASTQ_SINGLE_END=true
-
-# on the command line
-chromaflow samplesheet --pair-pattern '_R{R}_001.fastq.gz'
-chromaflow samplesheet --single-end
-chromaflow samplesheet --list-fastq        # preview pairing, write nothing
+python3 -m unittest discover -s tests -v
 ```
 
----
-
-## Configuration and automatic file discovery
-
-The config declares **only what you already have**. Files produced by the pipeline are never written back into it.
-
-```bash
-SPECIES_SHORT="Cre"
-PROJECT_DIR="/data/projects/CrDof_ChIP"
-REFERENCE_DIR="${PROJECT_DIR}/inputs/reference"
-
-GENOME_FASTA_SOURCE=".../genome.fa"         # plain or .gz/.bz2/.xz/.zst — auto-detected
-GENOME_GFF3_SOURCE=".../genes.gff3"         # same
-ANNOTATION_INFO=""                          # optional
-MEME_DB=""                                  # optional
-ORGANELLE_SOURCES=("chloroplast:NC_005353.1" "mitochondria:NC_001638.1")   # optional
-```
-
-Derived files (`*_combined.fa`, `*.fai`, `chrom.sizes`, `*.gtf`, `*.agat.gff3`) are resolved in this order:
-
-```
-explicit value in config  >  manifest registered by step 00/00b
-                          >  scan of REFERENCE_DIR  >  default name
-```
-
-The manifest lives at `<OUTPUT_DIR>/.chromaflow/reference.manifest`. Directory scanning prefers normalized annotations (`*.agat.gff3` over a plain `*.gff3`) and indexed genomes, so after running `normalize-gff` the annotation step uses the new file with no config edit. Explicit assignments in the config always win, so existing configs keep working unchanged.
-
----
-
-## Recipes
-
-### A. Standard analysis: find direct targets
-```bash
-mamba activate ChromaFlow_idr        && chromaflow idr
-mamba activate ChromaFlow_motif      && chromaflow motif
-mamba activate ChromaFlow_R          && chromaflow annotate
-mamba activate ChromaFlow_downstream && chromaflow candidates
-chromaflow tracks --gene-list results/downstream/chipseq/candidates/high_confidence_genes.txt
-```
-
-### B. Poor reproducibility: fall back to consensus
-When IDR leaves only a few dozen peaks, use the nf-core consensus set (higher sensitivity, lower specificity):
-```bash
-for step in motif annotate candidates; do chromaflow $step --peakset consensus; done
-chromaflow lookup --peakset consensus --gene-list my_genes.txt
-```
-
-### C. Check whether prior genes are bound
-```bash
-chromaflow lookup --gene-list my_genes.txt                      # IDR
-chromaflow lookup --gene-list my_genes.txt --peakset consensus  # consensus
-chromaflow tracks --gene-list results/downstream/chipseq/lookup/candidate_genes.txt \
-                  --outdir figures/my_targets
-```
-
-### D. Tighten to a high-confidence core set
-```bash
-chromaflow idr --min-pairs 2
-# then rerun motif → annotate → candidates with the same peakset
-```
-
-### E. Test the influence of one replicate
-```bash
-chromaflow idr                                        # read the pairwise table first
-chromaflow idr --exclude-rep REP1 -o results_noREP1   # compare peak counts
-```
-
-### F. Widen the genomic regions of interest
-```bash
-chromaflow candidates --features "Promoter,5' UTR,1st Exon,1st Intron,Distal Intergenic"
-```
-
----
-
-## Output guide
-
-```
-results/downstream/<type>/
-├── idr/
-│   ├── idr_peaks_threshold_0.01.bed   # reproducible peaks (signalValue / globalIDR / n_pairs)
-│   └── recommended_peaks.bed          # automatically chosen set
-├── motif[_peakset]/
-│   └── meme-chip_output/              # meme-chip.html, fimo_out_*/, centrimo_out/
-├── annotation[_peakset]/
-│   ├── peak_annotation_full.tsv       # per peak: gene, feature, signalValue
-│   ├── genes.bed                      # gene coordinates (used by tracks / lookup)
-│   ├── background_universe.txt        # GO background
-│   └── anno_pie.png / dist_to_tss.png / tss_avgprof.png
-├── candidates[_peakset]/
-│   ├── candidate_targets.tsv          # per-peak verdict (with per-motif counts)
-│   ├── motif_<name>_hits.tsv / _genes.txt
-│   ├── motif_summary.tsv              # hit counts + CentriMo central enrichment
-│   ├── high_confidence_genes.txt      # candidate genes, ranked by strength
-│   └── go/                            # input for agriGO / g:Profiler
-├── lookup[_peakset]/
-│   ├── query_binding.tsv              # evidence breakdown (tier column)
-│   └── candidate_genes.txt / bound_genes.txt / id_not_found.txt
-└── tracks[_peakset]/                  # per-gene browser shots + tracks.ini
-```
-
----
-
-## Environments
-
-| Environment | Purpose | Key tools |
-|---|---|---|
-| `nfcore_env` | main pipeline | nextflow, nf-core |
-| `ChromaFlow_ref` | reference prep, GFF normalization, GO | samtools, gffread, bedtools |
-| `ChromaFlow_agat` | *(optional)* AGAT-based normalization | AGAT |
-| `ChromaFlow_idr` | IDR | idr, numpy<1.24 |
-| `ChromaFlow_motif` | motif discovery | MEME Suite, bedtools |
-| `ChromaFlow_R` | ChIPseeker annotation | R, ChIPseeker, clusterProfiler |
-| `ChromaFlow_downstream` | integration, lookup, plotting | deepTools, pyGenomeTracks, bedtools |
-
-`ChromaFlow_agat` is deliberately separate and not installed by default: AGAT's Perl dependency tree often conflicts with the other packages. Install it with `WITH_AGAT=true bash setup_environments.sh` only if you want AGAT specifically.
-
-Run `chromaflow doctor` to check tools and reference files.
-
----
-
-## Quality assessment and interpretation
-
-### Reading the key metrics
-
-| Metric | Source | Meaning |
-|---|---|---|
-| NSC / RSC | phantompeakqualtools (printed in 03) | strand cross-correlation of enrichment; NSC > 1.05, RSC > 1.0 are ideal |
-| pairwise pass rate | the pair table in 03 | agreement between replicates |
-| `n_pairs` | column 8 of the 03 output | how many pairs support that peak |
-| signalValue | MACS fold enrichment | **quantitative** enrichment (shown in peak labels) |
-| globalIDR | IDR | reproducibility (-log10 scale; larger is better) |
-| CentriMo E-value | 04 | whether the motif is **centrally enriched** at summits — positional evidence of direct binding |
-
-### The right order for judging replicate quality
-
-1. **Read the pairwise table first**, not the per-replicate peak count or RSC. A replicate with more peaks is not necessarily more consistent — greater depth or background produces many irreproducible marginal peaks.
-2. **Compare NSC against Input.** If each ChIP's NSC is close to the Input's, overall enrichment is limited and an RSC "PASS" means little.
-3. **Tighten with `--min-pairs`, not by deleting replicates.** Removing a replicate destroys pairs; `--min-pairs 2` raises the evidence bar while keeping all data.
-
-### Layers of evidence
-
-Each layer answers a different question — **do not conflate them**:
-
-- **MACS / IDR** → is there reproducible enrichment here (statistical test vs Input)
-- **ChIPseeker** → which gene, and which part of it, does the peak fall in
-- **FIMO** → does the peak sequence contain the motif (**match quality, not binding strength**)
-- **CentriMo** → is the motif centrally enriched (supporting evidence for direct binding)
-- **Candidate call** → the intersection of positional and sequence evidence
-
-So a gene can be "candidate grade" yet show a weak track signal — candidacy is about **position and sequence**, while strength must be read from signalValue and the difference track. Moving from "candidate" to "direct functional target" still requires independent validation such as RNA-seq differential expression, EMSA or ChIP-qPCR.
-
----
-
-## Adapting to other species
-
-1. Edit `SPECIES_NAME` / `SPECIES_SHORT`, the source file paths, `MACS_GSIZE` and `ORGANELLE_SOURCES` in the config. Species without a suitable organelle genome simply leave `ORGANELLE_SOURCES=()` or pass `--skip-organelle`.
-2. Run `chromaflow normalize-gff` once and confirm that UTR proportions look sane in the annotation pie chart.
-3. Point `MEME_DB` at a database for the right clade (JASPAR plants / vertebrates …), or leave it empty to skip Tomtom.
-4. Set `KEGG_ORGANISM` to the KEGG species code; if gene IDs do not match KEGG's, that part is skipped automatically.
-5. **Gene ID format**: `lookup` strips only trailing version suffixes (`.1`, `.v6.1`), so `AT1G01010.1`, `ENSG00000141510.17`, `LOC_Os01g01010.1` and `Cre02.g075050_4532` all work; if an ID still maps to multiple genes after normalization it is flagged as ambiguous rather than guessed. Watch the **ID check** line in the lookup output to catch format mismatches early.
-
----
-
-## Dependency versions
-
-nf-core/chipseq 2.1.0 · nf-core/atacseq 2.1.2 · MACS3 · IDR · MEME Suite 5.x · ChIPseeker 1.42 · deepTools 3.5 · pyGenomeTracks · AGAT *(optional)* · bedtools 2.31
+The v1.2.7 validation run passed 113 tests, covering offline bundles, CLI execution,
+logs, peakset routing, setup plans, GFF preservation, TxDb identity aliases,
+interval-score recovery, shared motif filters, CentriMo labels and selection
+provenance. IDR postprocessing integration tests use real bedtools with deterministic
+IDR output; they skip when bedtools is unavailable. Linux/Bash-specific checks also
+skip on unsupported platforms. Real pyGenomeTracks rendering was checked separately
+with synthetic neighboring genes and dense transcript models. These checks do not
+replace a complete run on your own samples.

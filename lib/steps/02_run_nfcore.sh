@@ -23,11 +23,27 @@
 # ============================================================================
 
 set -euo pipefail
-source "${CHROMAFLOW_HOME:?请通过 chromaflow CLI 运行，或先 export CHROMAFLOW_HOME}/lib/common.sh"
+source "${CHROMAFLOW_HOME:?Run through the chromaflow CLI, or export CHROMAFLOW_HOME first}/lib/common.sh"
 load_config "${CHROMAFLOW_CONFIG:-}"
 init_dirs
 
-PIPELINE="${1:-chipseq}"
+PIPELINE="${1:-chipseq}"; shift || true
+
+# 透传给 nextflow 的额外参数：--skip-spp 等快捷开关，或 -- 之后的任意原样参数
+#   chromaflow run --skip-spp
+#   chromaflow run -- --skip_preseq --skip_igv -resume
+USER_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-spp|--skip_spp) USER_ARGS+=(--skip_spp); shift ;;
+        --) shift; while [[ $# -gt 0 ]]; do USER_ARGS+=("$1"); shift; done ;;
+        *) shift ;;
+    esac
+done
+# config 里也可以设 SKIP_SPP=true 长期关闭
+if [[ "${SKIP_SPP:-false}" == "true" ]]; then
+    case " ${USER_ARGS[*]} " in *" --skip_spp "*) ;; *) USER_ARGS+=(--skip_spp) ;; esac
+fi
 PROFILE="$(resolve_nfcore_profile)"
 ENGINE="$(nfcore_container_engine "${PROFILE}")"
 
@@ -44,8 +60,8 @@ case "${PIPELINE}" in
         NFCORE_VERSION="${NFCORE_ATACSEQ_VERSION}"
         ;;
     *)
-        echo "[ERROR] 未知 pipeline: ${PIPELINE}"
-        echo "  支持: chipseq, atacseq, dapseq"
+        echo "[ERROR] Unknown pipeline: ${PIPELINE}"
+        echo "  Supported: chipseq, atacseq, dapseq"
         exit 1
         ;;
 esac
@@ -57,44 +73,45 @@ open_log "02_run_nfcore" "${PIPELINE}"
 
 log_section "Run nf-core/${NFCORE_NAME} v${NFCORE_VERSION} (${PIPELINE}) [profile=${PROFILE}]"
 
+source "${CHROMAFLOW_HOME}/lib/nfcore_runtime.sh"
+configure_nfcore_runtime
+
 # ─────────────────────────────────────────────
 # 前置检查
 # ─────────────────────────────────────────────
-echo "[CHECK] 环境检查"
+echo "[CHECK] Environment check"
 
-check_tool nextflow || exit 1
-echo "[  OK ] nextflow $(nextflow -version 2>&1 | grep -oP 'version \K\S+')"
+check_tool "${NFCORE_NEXTFLOW}" || exit 1
+echo "[  OK ] nextflow $("${NFCORE_NEXTFLOW}" -version 2>&1 | grep -oP 'version \K\S+')"
 
 # 按 profile 检查对应的容器引擎（singularity 与 apptainer 可互相替代）
 case "${ENGINE}" in
     singularity|apptainer)
-        if command -v apptainer &>/dev/null; then
-            echo "[  OK ] apptainer $(apptainer --version)"
-        elif command -v singularity &>/dev/null; then
-            echo "[  OK ] singularity $(singularity --version)"
+        if command -v "${ENGINE}" &>/dev/null; then
+            echo "[  OK ] ${ENGINE} $("${ENGINE}" --version)"
         else
-            log_error "profile=${PROFILE} 需要 Apptainer/Singularity，但未检测到"
-            echo "  改用 conda 模式: chromaflow run --profile conda"
-            echo "  或在 chromaflow.config 里设 NFCORE_PROFILE=conda"
+            log_error "profile=${PROFILE} requires Apptainer/Singularity, but neither was detected"
+            echo "  Switch to online Conda mode: chromaflow run --profile conda"
+            echo "  Or set NFCORE_PROFILE=conda in chromaflow.config"
             exit 1
         fi
-        echo "[  OK ] 镜像缓存: ${NXF_SINGULARITY_CACHEDIR}"
+        echo "[  OK ] Image cache: ${NXF_SINGULARITY_CACHEDIR}"
         ;;
     docker|podman)
-        check_tool "${ENGINE}" || { echo "  改用: chromaflow run --profile conda"; exit 1; }
+        check_tool "${ENGINE}" || { echo "  Use: chromaflow run --profile conda"; exit 1; }
         echo "[  OK ] ${ENGINE} $(${ENGINE} --version 2>&1 | head -1)"
         ;;
     *)
-        log_warn "profile=${PROFILE} 不含已知容器引擎，按原样交给 nextflow"
+        log_warn "profile=${PROFILE} has no recognized container engine; passing it unchanged to Nextflow"
         ;;
 esac
 
 
-[[ ! -f "${SAMPLESHEET}" ]] && echo "[ERROR] samplesheet 不存在: ${SAMPLESHEET}" \
-    && echo "  请先运行: chromaflow samplesheet --type ${PIPELINE}" && exit 1
-[[ ! -f "${GENOME_COMBINED}" ]] && echo "[ERROR] 参考基因组不存在: ${GENOME_COMBINED}" \
-    && echo "  请先运行: chromaflow reference" && exit 1
-[[ ! -f "${GENOME_GTF}" ]] && echo "[ERROR] GTF 不存在: ${GENOME_GTF}" && exit 1
+[[ ! -f "${SAMPLESHEET}" ]] && echo "[ERROR] samplesheet does not exist: ${SAMPLESHEET}" \
+    && echo "  Run first: chromaflow samplesheet --type ${PIPELINE}" && exit 1
+[[ ! -f "${GENOME_COMBINED}" ]] && echo "[ERROR] Reference genome does not exist: ${GENOME_COMBINED}" \
+    && echo "  Run first: chromaflow reference" && exit 1
+[[ ! -f "${GENOME_GTF}" ]] && echo "[ERROR] GTF does not exist: ${GENOME_GTF}" && exit 1
 
 echo "[  OK ] samplesheet: ${SAMPLESHEET}"
 echo "[  OK ] genome:      ${GENOME_COMBINED}"
@@ -114,13 +131,13 @@ echo ""
 GSIZE_ARGS=()
 if [[ -n "${MACS_GSIZE}" ]]; then
     GSIZE_ARGS+=(--macs_gsize "${MACS_GSIZE}")
-    echo "[  OK ] MACS_GSIZE: ${MACS_GSIZE} (来源: $(value_origin MACS_GSIZE)$(
+    echo "[  OK ] MACS_GSIZE: ${MACS_GSIZE} (Source: $(value_origin MACS_GSIZE)$(
         m="$(derived_get MACS_GSIZE_METHOD 2>/dev/null || true)"; [[ -n "${m}" ]] && echo ", ${m}")）"
 elif [[ -n "${READ_LENGTH}" ]]; then
-    echo "[INFO ] 无 MACS_GSIZE，交给 nf-core 用 --read_length=${READ_LENGTH} 自行计算"
+    echo "[INFO ] MACS_GSIZE is unset; nf-core will estimate it using --read_length=${READ_LENGTH}"
 else
-    die "既无 MACS_GSIZE 也无 READ_LENGTH。先跑 chromaflow reference（自动实测），
-     或 chromaflow samplesheet（实测读长），或在 config 里显式指定其一"
+    die "Both MACS_GSIZE and READ_LENGTH are unset. Run chromaflow reference,
+     or chromaflow samplesheet, or explicitly configure one of these values"
 fi
 if [[ -n "${READ_LENGTH}" ]]; then GSIZE_ARGS+=(--read_length "${READ_LENGTH}"); fi
 
@@ -132,11 +149,11 @@ COMMON_ARGS=(
     --max_cpus "${MAX_CPUS}"
     --max_memory "${MAX_MEMORY}"
     --max_time "${MAX_TIME}"
-    -profile "${NFCORE_PROFILE}"
-    -r "${NFCORE_VERSION}"
+    -profile "${PROFILE}"
     -w "${WORK_DIR}"
 )
 COMMON_ARGS+=(${GSIZE_ARGS[@]+"${GSIZE_ARGS[@]}"})
+COMMON_ARGS+=(${NFCORE_VERSION_ARGS[@]+"${NFCORE_VERSION_ARGS[@]}"})
 
 # pipeline 特定参数
 EXTRA_ARGS=()
@@ -153,20 +170,23 @@ case "${PIPELINE}" in
 esac
 
 echo "============================================"
-echo " 运行命令"
+echo " Run command"
 echo "============================================"
 echo ""
-echo "nextflow run nf-core/${NFCORE_NAME} \\"
-for arg in "${COMMON_ARGS[@]}"; do echo "  ${arg} \\"; done
-for arg in "${EXTRA_ARGS[@]}"; do echo "  ${arg} \\"; done
+print_nfcore_command "${COMMON_ARGS[@]}" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} ${USER_ARGS[@]+"${USER_ARGS[@]}"} -resume
 echo ""
+if [[ "${CHROMAFLOW_DRY_RUN:-false}" == true ]]; then
+    echo "[DRY-RUN] Checks completed; analysis was not started."
+    exit 0
+fi
 
 # ─────────────────────────────────────────────
 # 确认执行
 # ─────────────────────────────────────────────
-read -p "确认运行? [y/N] " confirm
+confirm=y
+if [[ "${CHROMAFLOW_YES:-false}" != true ]]; then read -r -p "Start analysis? [y/N] " confirm; fi
 if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
-    echo "[ABORT] 已取消"
+    echo "[ABORT] Cancelled"
     exit 0
 fi
 
@@ -177,11 +197,12 @@ echo ""
 # 在 OUTPUT_DIR 下运行，使 work/.nextflow/日志 全部落在输出目录，代码目录零污染
 cd "${OUTPUT_DIR}"
 
-nextflow run "nf-core/${NFCORE_NAME}" \
+execute_nfcore \
     "${COMMON_ARGS[@]}" \
-    "${EXTRA_ARGS[@]}" \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
+    ${USER_ARGS[@]+"${USER_ARGS[@]}"} \
     -resume
 
 echo ""
-echo "[DONE] nf-core/${NFCORE_NAME} (${PIPELINE}) 完成 $(date)"
-echo "  结果: ${OUTDIR}"
+echo "[DONE] nf-core/${NFCORE_NAME} (${PIPELINE}) completed $(date)"
+echo "  Results: ${OUTDIR}"

@@ -1,29 +1,10 @@
 #!/usr/bin/env python3
-"""
-make_samplesheet.py — 从 samples 记录表生成 nf-core samplesheet
+"""Generate nf-core/chipseq (including DAP-seq) and nf-core/atacseq samplesheets.
 
-支持: nf-core/chipseq v2.1.0 (含 DAP-seq) | nf-core/atacseq v2.1.2
-
-样本记录表（两种写法，可混用注释）:
-
-  1) 带表头（推荐，列可任意顺序、可缺省、可加自定义列）:
-       sample_id  antibody  control_id  replicate  fastq_path
-       Dof_ChIP   crDOF     Input       1          /data/raw/Dof_rep1
-
-  2) 传统位置列（向后兼容）:
-       sample_id <TAB> antibody <TAB> control_id <TAB> replicate <TAB> fastq_path
-
-  也可直接给出双端文件（跳过自动配对）:
-       sample_id  replicate  fastq_1              fastq_2
-
-指令行（写在文件顶部的注释里，对整份表生效）:
-       #@ pair_pattern: _good_{R}.fq.gz     # {R} 处填 1/2
-       #@ single_end: true                  # 全部按单端处理
-
-用法:
-  python make_samplesheet.py samples.txt -o samplesheet.csv --pipeline chipseq
-  python make_samplesheet.py samples.txt -o out.csv --pair-pattern '_R{R}_001.fastq.gz'
-  python make_samplesheet.py samples.txt --list-fastq        # 只看配对结果，不写文件
+Accept a header table (sample_id, antibody, control_id, replicate, fastq_path),
+legacy positional columns, or explicit fastq_1 and fastq_2 columns.
+File-level comments can specify #@ pair_pattern: _R{R}_001.fastq.gz
+and #@ single_end: true. See `chromaflow help samples` for examples.
 """
 
 import argparse
@@ -50,7 +31,7 @@ SPLIT_TOKENS = re.compile(r"([._-])")
 
 # ────────────────────────────── FASTQ 配对 ──────────────────────────────
 def split_fastq_ext(name):
-    """('X_R1_001.fastq.gz') → ('X_R1_001', '.fastq.gz')；非 fastq 返回 (name, '')"""
+    """Split a FASTQ extension; return (name, '') for other file types."""
     low = name.lower()
     for ext in FASTQ_EXTS:
         if low.endswith(ext):
@@ -59,10 +40,10 @@ def split_fastq_ext(name):
 
 
 def mate_of(path, pattern=None):
-    """给定 R1 文件路径，推断 R2 路径。
+    """Infer the R2 path from an R1 file.
 
-    pattern: 用户模板，如 '_good_{R}.fq.gz'；None 则自动识别最右侧的双端记号。
-    返回 (r2_path, 记号描述)；无法判定返回 (None, None)。
+    Use a user template such as '_good_{R}.fq.gz', or detect the rightmost mate token.
+    Return (r2_path, token); return (None, None) if no mate can be inferred.
     """
     d, base = os.path.split(path)
 
@@ -87,7 +68,7 @@ def mate_of(path, pattern=None):
             np[i] = "%s2%s" % (m.group("tag") or "", m.group("suf") or "")
             return os.path.join(d, "".join(np) + ext), parts[i]
         if m and m.group("num") == "2":
-            return None, None                 # 这是 R2，跳过（由 R1 侧配对）
+            return None, None                 # 这是 R2，跳过（由 R1 侧Pair）
 
     # ── 3) 无分隔符收尾: sampleR1.fq.gz ──
     m = MATE_TAIL.search(stem)
@@ -97,7 +78,7 @@ def mate_of(path, pattern=None):
 
 
 def is_mate2(path, pattern=None):
-    """判断某文件是否是 R2（避免把 R2 当成独立单端样本）。"""
+    """Identify R2 files so they are not treated as independent single-end samples."""
     d, base = os.path.split(path)
     if pattern:
         return base.endswith(pattern.replace("{R}", "2"))
@@ -116,7 +97,7 @@ def is_mate2(path, pattern=None):
 
 
 def collect_candidates(path):
-    """path 可为目录 / 文件前缀 / glob / 单个 fastq 文件。"""
+    """Accept a directory, filename prefix, glob, or a single FASTQ file."""
     path = path.strip()
     cands = []
     if os.path.isfile(path):
@@ -137,10 +118,10 @@ def collect_candidates(path):
 
 
 def find_fastqs(path, pattern=None, single_end=False, verbose=True):
-    """发现并配对 FASTQ；返回 [(fastq_1, fastq_2), ...]，单端时 fastq_2 为空。"""
+    """Find FASTQ pairs; use an empty fastq_2 for single-end reads."""
     cands = collect_candidates(path)
     if not cands:
-        print("  [WARN] 未找到 fastq: %s" % path, file=sys.stderr)
+        print("  [WARN] FASTQ not found: %s" % path, file=sys.stderr)
         return []
 
     if single_end:
@@ -157,7 +138,7 @@ def find_fastqs(path, pattern=None, single_end=False, verbose=True):
             if token:
                 tokens.add(token)
         elif r2:
-            print("  [WARN] 缺配对文件，按单端处理: %s (期望 %s)"
+            print("  [WARN] Mate file missing; treating as single-end: %s (expected %s)"
                   % (os.path.basename(fq), os.path.basename(r2)), file=sys.stderr)
             pairs.append((fq, ""))
             used.add(fq)
@@ -165,7 +146,7 @@ def find_fastqs(path, pattern=None, single_end=False, verbose=True):
             pairs.append((fq, ""))
             used.add(fq)
     if verbose and tokens:
-        print("    · 配对记号: %s" % ", ".join(sorted(tokens)))
+        print("    · Pairing tokens: %s" % ", ".join(sorted(tokens)))
     return pairs
 
 
@@ -206,7 +187,7 @@ def _truthy(v):
 
 
 def parse_samples(filepath):
-    """返回 (records, directives)。records 为 dict 列表。"""
+    """Return a list of record dictionaries and file-level directives."""
     records, directives, header = [], {}, None
     with open(filepath, encoding="utf-8") as fh:
         for lineno, raw in enumerate(fh, 1):
@@ -231,13 +212,13 @@ def parse_samples(filepath):
                 rec = {header[i]: cols[i] for i in range(min(len(header), len(cols)))}
             else:
                 if len(cols) < 4:
-                    print("  [ERROR] 行%d 列数不足（位置格式需 ≥4 列，或改用表头格式）: %s"
+                    print("  [ERROR] Line %d has too few columns (positional format needs >=4, or use a header): %s"
                           % (lineno, line), file=sys.stderr)
                     continue
                 rec = {POSITIONAL[i]: cols[i] for i in range(min(len(POSITIONAL), len(cols)))}
 
             if not rec.get("sample_id"):
-                print("  [ERROR] 行%d 缺 sample_id" % lineno, file=sys.stderr)
+                print("  [ERROR] Line %d is missing sample_id" % lineno, file=sys.stderr)
                 continue
             for k in ("antibody", "control_id", "fastq_path", "fastq_1", "fastq_2"):
                 if rec.get(k, "").strip() in EMPTY:
@@ -251,7 +232,7 @@ def parse_samples(filepath):
 
 
 def resolve_reads(rec, pattern, single_end):
-    """一条记录 → [(fastq_1, fastq_2), ...]"""
+    """Expand one record into FASTQ pairs."""
     if rec.get("fastq_1"):
         return [(os.path.abspath(rec["fastq_1"]),
                  os.path.abspath(rec["fastq_2"]) if rec.get("fastq_2") else "")]
@@ -273,7 +254,7 @@ def build_rows(records, pipeline, pattern, single_end):
     for r in records:
         reads = resolve_reads(r, pattern, single_end)
         n_pe = sum(1 for _, f2 in reads if f2)
-        print("  · %-18s rep%-3s %d 个文件 (%d 双端 / %d 单端)"
+        print("  · %-18s rep%-3s %d libraries (%d paired-end / %d single-end)"
               % (r["sample_id"], r["replicate"], len(reads), n_pe, len(reads) - n_pe))
         for f1, f2 in reads:
             row = {"sample": r["sample_id"], "fastq_1": f1, "fastq_2": f2,
@@ -307,34 +288,34 @@ def validate(path, pipeline):
         try:
             sr[row["sample"]].add(int(row["replicate"]))
         except (ValueError, TypeError):
-            issues.append("  ⚠  '%s' replicate 非整数: %r" % (row["sample"], row["replicate"]))
+            issues.append("  ⚠  '%s' replicate is not an integer: %r" % (row["sample"], row["replicate"]))
         for k in ("fastq_1", "fastq_2"):
             if row.get(k) and not os.path.exists(row[k]):
-                issues.append("  ⚠  文件不存在: %s" % row[k])
+                issues.append("  ⚠  File does not exist: %s" % row[k])
         if not row.get("fastq_1"):
-            issues.append("  ⚠  '%s' 无 fastq_1（fastq_path 没找到文件？）" % row["sample"])
+            issues.append("  ⚠  '%s' has no fastq_1; check fastq_path" % row["sample"])
     for s, reps in sr.items():
         if 1 not in reps:
-            issues.append("  ⚠  '%s' replicate 不含 1（nf-core 要求从 1 开始）" % s)
+            issues.append("  ⚠  '%s' replicates do not include 1 (nf-core requires numbering from 1)" % s)
     if pipeline == "chipseq":
         all_s = set(sr.keys())
         for row in rows:
             c = row.get("control", "")
             if c and c not in all_s:
-                issues.append("  ⚠  '%s' 引用了不存在的 control '%s'" % (row["sample"], c))
+                issues.append("  ⚠  '%s' references missing control '%s'" % (row["sample"], c))
     if issues:
-        print("\n⚠  %d 个问题:" % len(issues))
+        print("\n⚠  %d issues:" % len(issues))
         for i in dict.fromkeys(issues):
             print(i)
     else:
-        print("\n✅ 验证通过")
+        print("\n✅ Validation passed")
     return not issues
 
 
 def preview(path):
     with open(path) as f:
         lines = f.read().strip().split("\n")
-    print("\n%s\n📋 预览 (%d 行):\n%s" % ("─" * 90, len(lines) - 1, "─" * 90))
+    print("\n%s\n📋 Preview (%d rows):\n%s" % ("─" * 90, len(lines) - 1, "─" * 90))
     print(lines[0])
     for l in lines[1:]:
         parts = l.split(",")
@@ -346,33 +327,33 @@ def preview(path):
 
 
 def main():
-    p = argparse.ArgumentParser(description="生成 nf-core samplesheet")
+    p = argparse.ArgumentParser(description="Generate an nf-core sample sheet")
     p.add_argument("samples_txt")
     p.add_argument("-o", "--output", default="samplesheet.csv")
     p.add_argument("-p", "--pipeline", choices=["chipseq", "atacseq"], default="chipseq")
     p.add_argument("--pair-pattern", default=None,
-                   help="双端命名模板，{R} 处为 1/2，如 '_good_{R}.fq.gz'（默认自动识别）")
-    p.add_argument("--single-end", action="store_true", help="全部按单端处理")
-    p.add_argument("--list-fastq", action="store_true", help="只打印配对结果，不写 samplesheet")
-    p.add_argument("--strict", action="store_true", help="有问题时以非 0 退出")
+                   help="Read-pair naming pattern with {R}=1/2, e.g. '_good_{R}.fq.gz' (default: automatic detection)")
+    p.add_argument("--single-end", action="store_true", help="Treat all inputs as single-end")
+    p.add_argument("--list-fastq", action="store_true", help="Print paired FASTQ files without writing a samplesheet")
+    p.add_argument("--strict", action="store_true", help="Exit nonzero if validation finds issues")
     p.add_argument("--validate-only", action="store_true")
     args = p.parse_args()
 
     if args.validate_only:
         sys.exit(0 if validate(args.samples_txt, args.pipeline) or not args.strict else 1)
 
-    print("📄 读取: %s" % args.samples_txt)
+    print("📄 Reading: %s" % args.samples_txt)
     recs, directives = parse_samples(args.samples_txt)
     if not recs:
-        print("[ERROR] 无有效记录", file=sys.stderr)
+        print("[ERROR] No valid records", file=sys.stderr)
         sys.exit(1)
 
     pattern = args.pair_pattern or directives.get("pair_pattern") or None
     single_end = args.single_end or _truthy(directives.get("single_end", "false"))
-    print("   %d 条记录 | 配对方式: %s%s"
-          % (len(recs), ("模板 " + pattern) if pattern else "自动识别",
-             " | 强制单端" if single_end else ""))
-    print("🔧 生成 nf-core/%s samplesheet..." % args.pipeline)
+    print("   %d records | Pairing mode: %s%s"
+          % (len(recs), ("pattern " + pattern) if pattern else "automatic detection",
+             " | forced single-end" if single_end else ""))
+    print("🔧 Generating nf-core/%s sample sheet..." % args.pipeline)
 
     rows = build_rows(recs, args.pipeline, pattern, single_end)
 
@@ -382,7 +363,7 @@ def main():
         return
 
     write_csv(args.output, args.pipeline, rows)
-    print("\n✅ 已生成: %s (%d 行)" % (args.output, len(rows)))
+    print("\n✅ Generated: %s (%d rows)" % (args.output, len(rows)))
     preview(args.output)
     ok = validate(args.output, args.pipeline)
     if args.strict and not ok:

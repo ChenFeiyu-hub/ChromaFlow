@@ -23,22 +23,27 @@ RUN_TEST=true
 R_VER="4.4"
 BIOC_VER="3.20"         # 与 r-base 4.4 匹配的 Bioconductor 发行
 PY_VER="3.12"
+CONDA=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --method) METHOD="$2"; shift 2 ;;
+        --solver) CONDA="$2"; shift 2 ;;
         --cn)     USE_CN=true; shift ;;
         --no-test) RUN_TEST=false; shift ;;
         --name)   ENV_NAME="$2"; shift 2 ;;
-        *) echo "未知参数: $1"; exit 1 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
 # 选 conda 前端
-CONDA=""
-for c in mamba micromamba conda; do command -v "$c" &>/dev/null && { CONDA="$c"; break; }; done
-[[ -n "${CONDA}" ]] || { echo "[ERROR] 未找到 mamba/conda"; exit 1; }
-echo "[INFO] 使用 ${CONDA}；方法=${METHOD}；环境=${ENV_NAME}"
+if [[ -z "${CONDA}" ]]; then
+    for c in mamba micromamba conda; do command -v "$c" &>/dev/null && { CONDA="$c"; break; }; done
+fi
+case "${CONDA}" in mamba|micromamba|conda) ;; *) echo '[ERROR] Invalid solver'; exit 2 ;; esac
+command -v "${CONDA}" >/dev/null || { echo "[ERROR] Solver is unavailable: ${CONDA}"; exit 1; }
+[[ -n "${CONDA}" ]] || { echo "[ERROR] mamba/conda was not found"; exit 1; }
+echo "[INFO] Using ${CONDA}; method=${METHOD}; environment=${ENV_NAME}"
 
 # 镜像
 if [[ "${USE_CN}" == "true" ]]; then
@@ -53,10 +58,10 @@ fi
 
 # ─────────────── 方法 A：硬化 conda（一把梭）───────────────
 install_conda() {
-    echo "[A] conda 一次性安装（conda-forge 优先 + strict priority + 锁版本）"
+    echo "[A] Conda installation (conda-forge first, strict channel priority, pinned versions)"
     # 关键：-c conda-forge 在 -c bioconda 之前；--strict-channel-priority
     ${CONDA} create -y -n "${ENV_NAME}" \
-        -c "${CF_CH}" -c "${BC_CH}" --strict-channel-priority \
+        --override-channels -c "${CF_CH}" -c "${BC_CH}" --strict-channel-priority \
         "python=${PY_VER}" "r-base=${R_VER}" \
         bioconductor-chipseeker \
         bioconductor-clusterprofiler \
@@ -67,25 +72,26 @@ install_conda() {
         bioconductor-go.db \
         bioconductor-genomeinfodbdata \
         r-ggplot2 r-biocmanager \
-    || { echo "[A 失败] 多半卡在 genomeinfodbdata/solve。改用: bash $0 --method bioc"; return 1; }
+        bedtools \
+    || { echo "[A FAILED] Check dependency solving and genomeinfodbdata; alternative: bash $0 --method bioc"; return 1; }
 }
 
 # ─────────────── 方法 B：conda 装 R+基础设施，BiocManager 装 ChIPseeker ───────────────
 install_bioc() {
-    echo "[B] conda 只装 R + 编译基础设施，ChIPseeker 及数据包交给 BiocManager"
+    echo "[B] Install R/build tools with Conda; install ChIPseeker/data packages with BiocManager"
     # 从 bioconda 拿「代码类」重型包的二进制（这些一般不出问题），
     # 数据类包(genomeinfodbdata/go.db)与 ChIPseeker 由 BiocManager 处理。
     ${CONDA} create -y -n "${ENV_NAME}" \
-        -c "${CF_CH}" -c "${BC_CH}" --strict-channel-priority \
+        --override-channels -c "${CF_CH}" -c "${BC_CH}" --strict-channel-priority \
         "python=${PY_VER}" "r-base=${R_VER}" r-biocmanager \
         bioconductor-genomicranges bioconductor-rtracklayer \
         bioconductor-genomicfeatures bioconductor-txdbmaker \
         r-ggplot2 r-xml r-rcurl \
         c-compiler cxx-compiler make pkg-config \
         curl libxml2 openssl zlib bzip2 xz \
-    || { echo "[B 失败] conda 基础设施装不上，见上方报错"; return 1; }
+    || { echo "[B FAILED] Conda base environment installation failed; see errors above"; return 1; }
 
-    echo "[B] 在环境内用 BiocManager 装 ChIPseeker（数据包走 Bioconductor 官方渠道）"
+    echo "[B] Install ChIPseeker using BiocManager inside the environment"
     ${CONDA} run -n "${ENV_NAME}" Rscript -e "
       options(repos=c(CRAN='${CRAN}'), timeout=600)
       options(BioC_mirror='${BIOC_MIRROR}')
@@ -93,30 +99,30 @@ install_bioc() {
       BiocManager::install(version='${BIOC_VER}', ask=FALSE, update=FALSE)
       BiocManager::install(c('ChIPseeker','clusterProfiler','GO.db','GenomeInfoDbData'),
                            ask=FALSE, update=FALSE)
-    " || { echo "[B 失败] BiocManager 安装出错，见上方"; return 1; }
+    " || { echo "[B FAILED] BiocManager installation failed; see errors above"; return 1; }
 }
 
 # ─────────────── 执行 ───────────────
 if "${CONDA}" env list 2>/dev/null | grep -qE "^\s*${ENV_NAME}\s"; then
-    echo "[WARN] 环境 ${ENV_NAME} 已存在。删除重装请先: ${CONDA} env remove -n ${ENV_NAME}"
+    echo "[WARN] Environment ${ENV_NAME} already exists; kept unchanged. Use --name to select a new environment."
     exit 1
 fi
 
 case "${METHOD}" in
     conda) install_conda ;;
     bioc)  install_bioc ;;
-    *) echo "未知 --method: ${METHOD}"; exit 1 ;;
+    *) echo "Unknown --method: ${METHOD}"; exit 1 ;;
 esac
 
 # ─────────────── 自检 ───────────────
 if [[ "${RUN_TEST}" == "true" ]]; then
     echo ""
-    echo "[TEST] 运行安装自检..."
+    echo "[TEST] Run installation self-test..."
     HERE="$(cd "$(dirname "$0")" && pwd)"
     ${CONDA} run -n "${ENV_NAME}" Rscript "${HERE}/test_chipseeker.R" \
-        && echo "[✅ PASS] ChIPseeker 环境可用" \
-        || { echo "[❌ FAIL] 自检未过，见上方分阶段报错"; exit 1; }
+        && echo "[✅ PASS] ChIPseeker environment is ready" \
+        || { echo "[❌ FAIL] Self-test failed; see stage-specific errors above"; exit 1; }
 fi
 
 echo ""
-echo "完成。使用: mamba activate ${ENV_NAME}"
+echo "Completed. Activate with: conda activate ${ENV_NAME}"

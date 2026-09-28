@@ -5,11 +5,11 @@
 set -euo pipefail
 source "${CHROMAFLOW_HOME}/lib/common.sh"
 
-PROJECT_DIR="${1:?用法: chromaflow init <project_dir> [type]}"
+PROJECT_DIR="${1:?Usage: chromaflow init <project_dir> [type]}"
 TYPE="${2:-chipseq}"
 TEMPLATES="${CHROMAFLOW_HOME}/templates"
 
-[[ -e "${PROJECT_DIR}" ]] && die "目标已存在: ${PROJECT_DIR}（避免覆盖，请换目录）"
+[[ -e "${PROJECT_DIR}" ]] && die "Destination already exists: ${PROJECT_DIR}(use a new directory to avoid overwriting)"
 
 mkdir -p "${PROJECT_DIR}"/{inputs/{raw,reference},outputs}
 cp "${TEMPLATES}/chromaflow.config" "${PROJECT_DIR}/chromaflow.config"
@@ -25,28 +25,28 @@ sed -i "s|^PROJECT_DIR=.*|PROJECT_DIR=\"${abs_dir}\"|" "${PROJECT_DIR}/chromaflo
 
 cat <<EOF
 
-[DONE] 已创建项目: ${abs_dir}
+[DONE] Project created: ${abs_dir}
 
   ${abs_dir}/
-  ├── chromaflow.config        ← 编辑：物种 + 源文件路径
-  ├── samples_${TYPE}.txt       ← 编辑：样本与 fastq 路径
+  ├── chromaflow.config        ← Edit: species and reference source paths
+  ├── samples_${TYPE}.txt       ← Edit: samples and FASTQ paths
   ├── inputs/
-  │   ├── raw/                  ← 放 fastq（或在 config 指向别处）
-  │   └── reference/            ← 放参考基因组源文件
-  └── outputs/                  ← 所有结果/日志/work（自动生成）
+  │   ├── raw/                  ← Place FASTQ here, or configure another input path
+  │   └── reference/            ← Place reference source files here
+  └── outputs/                  ← Generated results, logs and work files
 
-下一步:
+Next step:
   cd ${abs_dir}
-  vim chromaflow.config          # 物种 + 源文件路径（派生文件不用填）
-  vim samples_${TYPE}.txt         # 样本与 fastq 路径
+  vim chromaflow.config          # Species and reference source paths
+  vim samples_${TYPE}.txt         # Samples and FASTQ paths
 
-  chromaflow doctor              # 自检
-  chromaflow reference           # 可选：整理参考（已有基因组/GTF 可跳过）
+  chromaflow doctor              # Check configuration and tools
+  chromaflow reference           # Prepare reference files if needed
   chromaflow samplesheet --type ${TYPE}
   chromaflow run         --type ${TYPE}
 
-帮助:
-  chromaflow help                # 命令总览
-  chromaflow help config         # config 里该写什么
-  chromaflow help samples        # 样本表格式与双端配对规则
+Help:
+  chromaflow help                # Command overview
+  chromaflow help config         # Configuration reference
+  chromaflow help samples        # Sample records and FASTQ pairing
 EOF

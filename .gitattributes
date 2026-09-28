@@ -1,0 +1,2 @@
+# Keep shell scripts, source and checksum text portable across Windows and Linux.
+* text=auto eol=lf
