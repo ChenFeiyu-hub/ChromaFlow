@@ -101,6 +101,48 @@ exit "${TEST_EXIT:-0}"
         self.assertFalse(self.record.exists())
         self.assertIn('[DRY-RUN]', result.stdout)
 
+    def test_gsize_and_read_length_are_alternative_nfcore_inputs(self):
+        # Exercise both launchers and both supported native pipelines. The
+        # upstream enum rejects 130 even though its estimator is not needed.
+        for name in ('conda', 'mamba'):
+            tool = self.tools / name
+            tool.write_text('#!/usr/bin/env bash\necho "fixture solver 1.0"\n')
+            tool.chmod(0o755)
+        for pipeline in ('dapseq', 'atacseq'):
+            sheet = self.project / f'outputs/samplesheets/samplesheet_{pipeline}.csv'
+            sheet.write_text('sample,fastq_1,fastq_2\n')
+            for profile in ('apptainer', 'conda'):
+                for gsize, length in (('100', '130'), ('100', '150'), ('100', ''), ('', '150')):
+                    with self.subTest(pipeline=pipeline, profile=profile, gsize=gsize, length=length):
+                        with (self.project / 'chromaflow.config').open('a') as stream:
+                            stream.write(f'MACS_GSIZE={gsize}\nREAD_LENGTH={length}\nNFCORE_CONDA_MIRROR=none\n')
+                        result = self.cli(['--type', pipeline, '--profile', profile, '--no-conda-patch'])
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        args = self.recorded_args()
+                        if gsize:
+                            self.assertEqual(args[args.index('--macs_gsize') + 1], gsize)
+                            self.assertNotIn('--read_length', args)
+                            if length:
+                                self.assertIn(f'READ_LENGTH={length} retained in ChromaFlow', result.stdout)
+                        else:
+                            self.assertNotIn('--macs_gsize', args)
+                            self.assertEqual(args[args.index('--read_length') + 1], length)
+
+    def test_batch_output_work_and_executor_config_are_explicit(self):
+        executor = self.project / 'executor.config'
+        executor.write_text("executor { name='local'; cpus=8; memory=32.GB }\n")
+        with (self.project/'chromaflow.config').open('a') as f:
+            for key, value in [('CF_BATCH_NFCORE_OUT', self.project/'results/nfcore/se_k150'),
+                               ('CF_BATCH_WORK_DIR', self.project/'work/batch/se_k150'),
+                               ('CF_BATCH_EXECUTOR_CONFIG', executor)]:
+                f.write(key+'='+shlex.quote(shell_path(value))+'\n')
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        args = self.recorded_args()
+        self.assertEqual(args[args.index('--outdir')+1], shell_path(self.project/'results/nfcore/se_k150'))
+        self.assertEqual(args[args.index('-w')+1], shell_path(self.project/'work/batch/se_k150'))
+        self.assertEqual(args[args.index('-c')+1], shell_path(executor))
+
     def test_offline_without_bundle_fails_before_nextflow(self):
         result = self.cli(['--offline'])
         self.assertNotEqual(result.returncode, 0)
@@ -125,6 +167,16 @@ exit "${TEST_EXIT:-0}"
         self.assertIn((bundle / 'payload/2_1_0').as_posix(), args)
         envfile = self.project / 'outputs/.chromaflow/offline-runtime.env'
         self.assertIn('NXF_OFFLINE=true', envfile.read_text(encoding='utf-8'))
+        executor = self.project/'batch-executor.config'
+        executor.write_text("executor { name='local'; cpus=8; memory=32.GB }\n")
+        with (self.project/'chromaflow.config').open('a') as f:
+            f.write('CF_BATCH_EXECUTOR_CONFIG='+shlex.quote(shell_path(executor))+'\n')
+        result = self.cli(['--offline', '--bundle', shell_path(bundle)])
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        args = self.recorded_args()
+        self.assertIn('-C', args)
+        self.assertNotIn('-c', args)
+        self.assertEqual(args[args.index('-C')+1].split(',')[-1], shell_path(executor))
 
 
 if __name__ == '__main__':

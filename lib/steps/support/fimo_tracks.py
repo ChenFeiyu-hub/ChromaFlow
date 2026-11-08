@@ -7,6 +7,67 @@ from pathlib import Path
 import re
 
 
+def fimo_rows(path, sources=None):
+    """Read a FIMO TSV, including the completed, footer-only zero-hit format.
+
+    FIMO 5.5.7 writes its header in print_site_as_tsv(), on the first hit.
+    An empty scan therefore contains only the three completion comments.
+    A blank file, arbitrary comments, or malformed columns are not zero hits.
+    """
+    comments = []
+    required = {'motif_id', 'sequence_name', 'start', 'stop', 'strand', 'p-value'}
+    with open(path, encoding='utf-8-sig', newline='') as stream:
+        def lines():
+            for line in stream:
+                if not line.strip():
+                    continue
+                if line.startswith('#'):
+                    comments.append(line.strip())
+                else:
+                    yield line
+        reader = csv.DictReader(lines(), delimiter='\t')
+        fields = reader.fieldnames
+        if fields is None:
+            completed = (
+                len(comments) == 3
+                and re.fullmatch(r'# FIMO \(Find Individual Motif Occurrences\): Version '
+                                 r'\d+\.\d+\.\d+.* compiled on .+ at .+', comments[0])
+                and comments[1].startswith('# The format of this file is described at ')
+                and comments[1].endswith('/doc/fimo-output-format.html#tsv_results.')
+                and re.match(r'# (?:\S*/)?fimo\s+\S+\s+\S+', comments[2])
+            )
+            if not completed:
+                raise ValueError('Missing required result columns: ' + str(path)
+                                 + '; no table header or recognized FIMO completion footer')
+            # A companion GFF, when available, must agree. Never hide a lost TSV
+            # table when the same run reports hits in its other output format.
+            gff = Path(path).with_suffix('.gff')
+            if gff.exists():
+                header_seen = False
+                with gff.open(encoding='utf-8') as handle:
+                    for line in handle:
+                        line = line.strip()
+                        header_seen |= line == '##gff-version 3'
+                        if line and not line.startswith('#'):
+                            raise ValueError('Footer-only FIMO TSV conflicts with its GFF: ' + str(path))
+                if not header_seen:
+                    raise ValueError('Footer-only FIMO TSV conflicts with its GFF: ' + str(path))
+                if sources is not None:
+                    sources.append(gff.resolve())
+            print('[FIMO] No reported hits (completed footer-only result): ' + str(path))
+            return []
+        missing = required - set(fields)
+        if missing:
+            raise ValueError('Missing required result columns: ' + str(path)
+                             + '; missing=' + ','.join(sorted(missing))
+                             + '; found=' + ','.join(fields))
+        rows = list(reader)
+        for rowno, row in enumerate(rows, 2):
+            if None in row or any(row.get(key) is None for key in required):
+                raise ValueError(f'Malformed FIMO table row {rowno}: {path}')
+        return rows
+
+
 def read_sizes(path):
     sizes = {}
     if path and Path(path).is_file():
@@ -51,31 +112,26 @@ def export(files, output, audit, pmax=1e-4, sizes=None):
     hits = {}
     raw_count = 0
     for path in files:
-        with open(path, encoding='utf-8') as stream:
-            reader = csv.DictReader((line for line in stream if line.strip() and not line.startswith('#')), delimiter='\t')
-            required = {'motif_id','sequence_name','start','stop','strand','p-value'}
-            if not required.issubset(reader.fieldnames or []):
-                raise ValueError('Missing FIMO columns: '+str(path))
-            for rowno, row in enumerate(reader, 2):
-                try:
-                    p = float(row['p-value'])
-                    if not math.isfinite(p) or not 0 <= p <= 1:
-                        raise ValueError('Invalid p-value')
-                    if p > pmax:
-                        continue
-                    chrom, start, end, mode = coordinates(row['sequence_name'].strip(), int(row['start']), int(row['stop']), sizes)
-                    strand = row['strand'].strip()
-                    if strand not in ('+','-','.'):
-                        raise ValueError('Invalid strand')
-                except (ValueError, TypeError) as exc:
-                    raise ValueError(f'{path}: row {rowno}: {exc}') from exc
-                motif = row['motif_id'].strip()
-                alias = (row.get('motif_alt_id') or '').strip()
-                label = alias if alias and alias != '.' else motif
-                raw_count += 1
-                key = (chrom, start, end, strand, motif, label)
-                if key not in hits or p < hits[key][0]:
-                    hits[key] = (p, mode, str(path))
+        for rowno, row in enumerate(fimo_rows(path), 2):
+            try:
+                p = float(row['p-value'])
+                if not math.isfinite(p) or not 0 <= p <= 1:
+                    raise ValueError('Invalid p-value')
+                if p > pmax:
+                    continue
+                chrom, start, end, mode = coordinates(row['sequence_name'].strip(), int(row['start']), int(row['stop']), sizes)
+                strand = row['strand'].strip()
+                if strand not in ('+','-','.'):
+                    raise ValueError('Invalid strand')
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f'{path}: row {rowno}: {exc}') from exc
+            motif = row['motif_id'].strip()
+            alias = (row.get('motif_alt_id') or '').strip()
+            label = alias if alias and alias != '.' else motif
+            raw_count += 1
+            key = (chrom, start, end, strand, motif, label)
+            if key not in hits or p < hits[key][0]:
+                hits[key] = (p, mode, str(path))
     # Parse everything before publishing so a bad row cannot look like success.
     with open(output, 'w', encoding='utf-8', newline='') as bed, open(audit, 'w', encoding='utf-8', newline='') as report:
         report.write('chrom\tstart\tend\tstrand\tmotif_id\tmotif_label\tp_value\tcoordinate_mode\tsource\n')

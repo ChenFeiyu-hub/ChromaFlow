@@ -5,7 +5,7 @@
 # 顶层帮助保持一屏可读；每个子命令的细节用 `chromaflow help <command>` 展开。
 # ============================================================================
 
-CHROMAFLOW_VERSION="${CHROMAFLOW_VERSION:-1.2.7}"
+CHROMAFLOW_VERSION="${CHROMAFLOW_VERSION:-1.2.9}"
 
 help_main() {
 cat <<'EOF'
@@ -31,6 +31,7 @@ REFERENCE (optional, run once per species)
 MAIN PIPELINE
   samplesheet [--type T]               01  Build the nf-core samplesheet
   run [--type T]                       02  Run nf-core/chipseq | atacseq
+  batch init|plan|run|status|reports    DAP-seq batch workflow and diagnostic reports
 
 DOWNSTREAM
   idr [--min-pairs N] [--exclude-rep R]   03  Reproducible peaks (IDR)
@@ -219,6 +220,7 @@ EOF
 
 help_command() {
     case "$1" in
+    batch) python3 "${CHROMAFLOW_HOME}/lib/batch.py" --help ;;
     setup) bash "${CHROMAFLOW_HOME}/setup_environments.sh" --help ;;
     offline) cat <<'EOF'
 chromaflow offline prepare|check|pack --bundle DIR [options]

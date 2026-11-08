@@ -36,7 +36,7 @@ fi
 resolve_peakset "${PIPELINE}" "${CHROMAFLOW_PEAKSET:-idr}"
 INPUT_PEAKS="${PEAKSET_FILE}"; SRC="${CHROMAFLOW_PEAKSET:-idr}"
 [[ -s "${INPUT_PEAKS}" ]] || die "Peak-set file is empty: ${INPUT_PEAKS}"
-ANNO_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/annotation${PEAKSET_SUFFIX}")"
+ANNO_OUT="$(step_outdir "$(downstream_dir "${PIPELINE}")/annotation${PEAKSET_SUFFIX}")"
 mkdir -p "${ANNO_OUT}"
 
 echo "  Input peaks: ${INPUT_PEAKS} (${SRC})"
@@ -49,7 +49,8 @@ echo ""
 Rscript "${CHROMAFLOW_HOME}/lib/steps/05_peak_annotation.R" \
     "${GENOME_GFF3}" "${INPUT_PEAKS}" "${ANNO_OUT}" \
     "${PROMOTER_UP}" "${PROMOTER_DOWN}" "${ANNOTATION_INFO:-}" \
-    "${TARGET_DIST_KB}" "${PIPELINE}" "${KEGG_ORGANISM:-}" "${MAKE_PLOTS}"
+    "${TARGET_DIST_KB}" "${PIPELINE}" "${KEGG_ORGANISM:-}" "${MAKE_PLOTS}" \
+    "" "${CHROM_SIZES}" "${PEAKSET_KIND}"
 
 python3 "${CHROMAFLOW_HOME}/lib/steps/support/annotation_policy.py" validate \
     "${ANNO_OUT}/peak_annotation_full.tsv" --up "${PROMOTER_UP}" --down "${PROMOTER_DOWN}"

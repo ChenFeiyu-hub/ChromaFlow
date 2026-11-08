@@ -9,7 +9,16 @@ import os
 from pathlib import Path
 import re
 from annotation_policy import sha256
-from fimo_tracks import coordinates, scan_windows
+from fimo_tracks import coordinates, scan_windows, fimo_rows
+
+
+def chromaflow_version():
+    """Read the installed CLI version; never copy a release number into reports."""
+    source = (Path(__file__).resolve().parents[2]/'help.sh').read_text(encoding='utf-8')
+    match = re.search(r'CHROMAFLOW_VERSION:-([^}]+)\}', source)
+    if not match:
+        raise ValueError('Cannot determine the installed ChromaFlow version')
+    return match.group(1)
 
 
 def number(value, name, maximum=None):
@@ -87,7 +96,7 @@ class Evidence:
         for path in self.files:
             if path.parent.parent != self.root:
                 raise ValueError('FIMO files must belong to one MEME-ChIP run: '+str(path))
-            for row in table(path, ('motif_id','sequence_name','start','stop','strand','p-value')):
+            for row in fimo_rows(path, self.sources):
                 raw = (row.get('motif_id') or '').strip()
                 alias = (row.get('motif_alt_id') or '').strip()
                 label = alias if alias and alias != '.' else raw
@@ -206,7 +215,7 @@ class Evidence:
             if extra.is_file():
                 self.sources.append(extra.resolve())
         sources = list(dict.fromkeys(self.sources+[Path(annotation).resolve(), Path(peak_file).resolve()]))
-        result = {'schema': 1, 'status': 'complete', 'version': '1.2.7',
+        result = {'schema': 1, 'status': 'complete', 'version': chromaflow_version(),
             'pipeline': os.environ.get('CFSEL_PIPELINE', 'chipseq'), 'peakset': os.environ.get('CHROMAFLOW_PEAKSET', 'idr'),
             'peak_file': str(Path(peak_file).resolve()), 'peak_sha256': sha256(peak_file),
             'filters': self.filters, 'parameters': parameters, 'files': files,

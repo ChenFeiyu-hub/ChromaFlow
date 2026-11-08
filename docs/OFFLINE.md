@@ -1,13 +1,13 @@
 # Offline nf-core deployment with ChromaFlow
 
-This guide applies to ChromaFlow 1.2.7, nf-core/chipseq 2.1.0, nf-core/atacseq 2.1.2 and Nextflow 25.10.4. DAP-seq uses the chipseq bundle. The preparation computer needs Linux/WSL, network access, Python, Java, nf-core/tools and Apptainer/Singularity. The server needs Linux, Python, Java and Apptainer/Singularity; it does not need the nf-core CLI or process-specific Conda environments.
+This guide applies to ChromaFlow 1.2.9, nf-core/chipseq 2.1.0, nf-core/atacseq 2.1.2 and Nextflow 25.10.4. DAP-seq uses the chipseq bundle. The preparation computer needs Linux/WSL, network access, Python, Java, nf-core/tools and Apptainer/Singularity. The server needs Linux, Python, Java and Apptainer/Singularity; it does not need the nf-core CLI or process-specific Conda environments.
 
 ## 1. Install ChromaFlow on the connected computer
 
 Extract the ChromaFlow release and add its `bin` directory to PATH. Use a Linux path inside WSL:
 
 ```bash
-cd /mnt/d/biosoft/ChromaFlow-1.2.7/ChromaFlow  # adjust to your extraction location
+cd /mnt/d/biosoft/ChromaFlow-1.2.9/ChromaFlow  # adjust to your extraction location
 export CHROMAFLOW_HOME="$PWD"
 export PATH="$CHROMAFLOW_HOME/bin:$PATH"
 chromaflow version
@@ -53,26 +53,24 @@ unset GITHUB_TOKEN
 
 A token cannot repair a TCP timeout to container registries. Fix connectivity/proxy routing on the preparation computer. The target server does not need this token, proxy or GitHub access. Lower `--parallel-downloads` to 1 or 2 if concurrent downloads are unstable.
 
-## 3. Upload archives and checksums
+## 3. Upload archives
 
 Copy these files using your approved transfer method:
 
 ```text
-ChromaFlow-1.2.7.tar.gz
-ChromaFlow-1.2.7.tar.gz.sha256
+ChromaFlow-1.2.9.tar.gz
 chipseq-2.1.0.tar
-chipseq-2.1.0.tar.sha256
 atacseq-2.1.2.tar
-atacseq-2.1.2.tar.sha256
 ```
 
 For example, if SSH transfer is available, replace `USER` and `SERVER` with your own login and server address, and create `~/nfcore-upload` on the server first:
 
 ```bash
-scp "$HOME/nfcore-transfer/"*.tar "$HOME/nfcore-transfer/"*.sha256 USER@SERVER:~/nfcore-upload/
+scp "$HOME/nfcore-transfer/chipseq-2.1.0.tar" \
+    "$HOME/nfcore-transfer/atacseq-2.1.2.tar" USER@SERVER:~/nfcore-upload/
 ```
 
-The ChromaFlow release is copied separately from wherever you saved it. Complete uploads before checking/extracting. Checksums created by 1.2.7 use LF line endings on all platforms. If a legacy checksum file contains CRLF, remove only its CR characters before verifying; do not change the archive.
+Copy the ChromaFlow release separately from wherever you saved it. Complete uploads before extracting. No separate manual transfer-checksum step is required. The downloaded bundles keep their internal inventory; use `offline check --verify --runtime-check` after installation as shown below.
 
 ## 4. Shared bundle installation under /opt
 
@@ -80,9 +78,6 @@ Run on the server as an account with sudo. These commands assume the two bundle 
 
 ```bash
 cd "$HOME/nfcore-upload"
-sha256sum -c ChromaFlow-1.2.7.tar.gz.sha256
-sha256sum -c chipseq-2.1.0.tar.sha256
-sha256sum -c atacseq-2.1.2.tar.sha256
 tar -tf chipseq-2.1.0.tar | head
 tar -tf atacseq-2.1.2.tar | head
 
@@ -101,7 +96,7 @@ done
 
 Use a dedicated version directory for each bundle. Ordinary accounts need read permission for files and traversal permission on directories; they do not need write permission inside `/opt`. Files extracted by sudo above are administrator-owned. Do not run analyses with sudo. Per-user projects, Nextflow work, state and logs remain in the user's writable project, with startup checks using a temporary state directory by default.
 
-Install ChromaFlow in each user's `~/biosoft/ChromaFlow-1.2.7` as shown in the README, or have the administrator install one readable shared code directory. A dedicated service user is unnecessary for interactive analyses. Each account can retain its own Conda environments.
+Install ChromaFlow in each user's `~/biosoft/ChromaFlow-1.2.9` as shown in the README, or have the administrator install one readable shared code directory. A dedicated service user is unnecessary for interactive analyses. Each account can retain its own Conda environments.
 
 ## 5. Validate on the target server
 
@@ -154,7 +149,7 @@ The selected bundle must match `--type` and the configured pipeline revision. `-
 
 ## 7. Manage upgrades and diagnose failures
 
-- **ChromaFlow-only update:** install a new software directory, check `version`, retain project configs and valid bundles. For 1.2.7, neither GFF reference regeneration nor another nf-core run is required to get the new logger/plotter.
+- **ChromaFlow-only update:** install a new software directory, check `version`, retain project configs and valid bundles. Existing analyses need not be rerun solely to install 1.2.9. Use the [release acceptance helper](RELEASE_ACCEPTANCE.md) to verify batch upgrade compatibility and resume before retiring the previous installation.
 - **Pipeline update:** create a new bundle directory, select explicit pipeline/Nextflow versions, validate and transfer it, then change the project bundle path and corresponding `NFCORE_*_VERSION`. Keep the previous bundle for reproducibility. Do not silently replace files inside an installed version.
 - **Missing image or plugin:** repair/complete the bundle on the connected computer, verify, repack to a new archive filename and re-transfer. Manually copying a random Nextflow plugin cache does not establish version compatibility.
 - **Checksum mismatch:** verify upload completion and compare the source archive; do not bypass verification.

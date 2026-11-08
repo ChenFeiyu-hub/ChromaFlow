@@ -585,9 +585,9 @@ derive_paths() {
 
     # ---- 输出侧（全部在 OUTPUT_DIR 下，与代码/输入彻底隔离）----
     RESULTS_DIR="${OUTPUT_DIR}/results"
-    LOG_DIR="${OUTPUT_DIR}/logs"
+    LOG_DIR="${CF_BATCH_LOG_DIR:-${OUTPUT_DIR}/logs}"
     SAMPLESHEET_DIR="${OUTPUT_DIR}/samplesheets"
-    WORK_DIR="${OUTPUT_DIR}/work"               # nextflow work
+    WORK_DIR="${CF_BATCH_WORK_DIR:-${OUTPUT_DIR}/work}" # nextflow work
     NXF_SINGULARITY_CACHEDIR="${OUTPUT_DIR}/.singularity_cache"
     export NXF_SINGULARITY_CACHEDIR SINGULARITY_CACHEDIR="${NXF_SINGULARITY_CACHEDIR}"
     # Apptainer 1.x 读的是自己的变量名，一并指向同一缓存，避免镜像被下载两份
@@ -729,8 +729,12 @@ init_dirs() {
 # 按需初始化某 pipeline 的输出目录
 init_pipeline_dirs() {
     local pipeline="${1:?Usage: init_pipeline_dirs <chipseq|atacseq|dapseq>}"
-    mkdir -p "${RESULTS_DIR}/downstream/${pipeline}"
+    mkdir -p "$(downstream_dir "${pipeline}")"
 }
+
+# Batch-generated configs bind a single analysis to its own downstream root.
+# The historical single-project layout is unchanged.
+downstream_dir() { echo "${CF_BATCH_ANALYSIS_DIR:-${RESULTS_DIR}/downstream/$1}"; }
 
 # ─────────────── nf-core 输出路径帮助函数 ───────────────
 get_nfcore_peak_dir() {
@@ -819,9 +823,17 @@ get_consensus_with_signal() {
 #   <文件路径>       → 直接用该文件，后缀 "_custom"
 resolve_peakset() {
     local pipeline="${1}" spec="${2:-idr}"
+    if [[ -n "${CF_BATCH_PEAK_FILE:-}" ]]; then
+        [[ "${spec}" == consensus ]] || die 'Batch analysis configs require --peakset consensus'
+        [[ -s "${CF_BATCH_PEAK_FILE}" ]] || die "Batch peak file is missing or empty: ${CF_BATCH_PEAK_FILE}"
+        PEAKSET_FILE="${CF_BATCH_PEAK_FILE}"; PEAKSET_SUFFIX=""; PEAKSET_KIND=non_idr
+        export PEAKSET_FILE PEAKSET_SUFFIX PEAKSET_KIND
+        return 0
+    fi
     local idr_dir="${RESULTS_DIR}/downstream/${pipeline}/idr"
     case "${spec}" in
         idr|idr:*)
+            PEAKSET_KIND=idr
             if [[ -f "${idr_dir}/idr.status" && "$(cat "${idr_dir}/idr.status")" != complete ]]; then
                 die 'The latest IDR run did not complete; rerun IDR before using its peak sets.'
             fi
@@ -831,15 +843,17 @@ resolve_peakset() {
             if [[ "${thr}" == "0.01" ]]; then PEAKSET_SUFFIX=""; else PEAKSET_SUFFIX="_idr${thr}"; fi
             ;;
         consensus)
+            PEAKSET_KIND=non_idr
             PEAKSET_FILE="$(get_consensus_with_signal "${pipeline}")"
             PEAKSET_SUFFIX="_consensus"
             ;;
         *)
+            PEAKSET_KIND=unknown
             PEAKSET_FILE="${spec}"; PEAKSET_SUFFIX="_custom"
             [[ -s "${PEAKSET_FILE}" ]] || die "Peak-set file does not exist: ${PEAKSET_FILE}"
             ;;
     esac
-    export PEAKSET_FILE PEAKSET_SUFFIX
+    export PEAKSET_FILE PEAKSET_SUFFIX PEAKSET_KIND
 }
 
 # 打开日志（tee 到 OUTPUT_DIR/logs）

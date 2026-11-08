@@ -1,4 +1,4 @@
-# ChromaFlow 1.2.7 架构
+# ChromaFlow 1.2.9 架构
 
 ## 软件、项目配置与分析数据分开
 
@@ -20,6 +20,7 @@ bin/chromaflow                      CLI、命令路由、统一下游日志
 lib/common.sh                      配置读取、路径派生、输入发现、peakset 解析
 lib/help.sh                        英文命令帮助与软件版本
 lib/nfcore_runtime.sh               容器/Conda 入口共用的 nf-core 运行配置
+lib/batch.py                        批量计划、执行、环境选择、结果隔离和断点状态
 lib/offline_bundle.py               下载调度、版本锁定、文件校验与打包
 lib/selection.sh                    candidates / lookup 共享参数解析
 lib/steps/                         reference、samplesheet、run、各下游步骤
@@ -31,7 +32,8 @@ lib/steps/support/
   fimo_tracks.py / track_layout.py  已有 FIMO 坐标转换、区域轨道高度
  templates/                        init 使用的项目配置及三种分析样本表
  env/ + setup_environments.sh       按用途构建 runtime 和独立下游环境
- conf/nextflow.config               通用 Nextflow 配置
+ release/                          运行代码兼容关系及发布验收记录
+ tools/acceptance.py                统一服务器验收及反馈收集入口
  docs/                             当前离线部署、下游与筛选操作指南
  tests/                            回归及可用时运行的真实工具集成检查
 ```
@@ -97,3 +99,14 @@ project/
 设置 `OUTPUT_DIR="${PROJECT_DIR}"` 可把 outputs 下这些目录直接放在项目根。
 下游目录按需创建。CLI 每次运行记录英文终端 stdout/stderr、命令、版本、config 路径和退出码，
 使用独立日志文件；尚未识别项目时的参数错误及进程中断存在文档所述的日志边界。
+
+## 批量 DAP-seq（1.2.9）
+
+`chromaflow batch` 有独立的子命令解析器。用户只维护共享 config 和 samples.tsv；
+`lib/batch.py` 生成快照，明确调用环境与绝对 CLI 路径，再复用既有参考和下游命令。
+按 layout 与读长分组进入 nf-core/chipseq 2.1.0；不同 analysis_id 使用不同 antibody
+分组键，控制样本显式引用。下游从精确输出 manifest 取得本分析的 peaks。
+`CF_BATCH_*` 为内部生成配置字段，普通单项目不设置时保留原有目录布局。
+
+批量用 SHA256 追踪参考/输出、用输入和参数签名控制复用；断点状态与结果摘要分别记录。
+失败或无法评估的分析不填零候选。详情与限制见 [BATCH.md](docs/BATCH.md)。

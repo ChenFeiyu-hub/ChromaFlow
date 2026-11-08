@@ -25,6 +25,17 @@ configure_nfcore_runtime() {
         echo "[OFFLINE] Plugins: ${NXF_PLUGINS_DIR}"
         echo "[OFFLINE] Nextflow ${NXF_VER}; Automatic version checks and plugin downloads are disabled"
     fi
+    if [[ -n "${CF_BATCH_EXECUTOR_CONFIG:-}" ]]; then
+        [[ -s "${CF_BATCH_EXECUTOR_CONFIG}" ]] || die 'Batch executor config is missing'
+        # Nextflow ignores -c when -C is present. Keep the batch limits in the
+        # explicit offline config list instead of silently dropping them.
+        if [[ "${offline}" == true ]]; then
+            NFCORE_GLOBAL_ARGS=(-C "${NFCORE_RUN_TARGET}/nextflow.config,${NFCORE_OFFLINE_CONFIG},${CF_BATCH_EXECUTOR_CONFIG}")
+        else
+            NFCORE_GLOBAL_ARGS+=(-c "${CF_BATCH_EXECUTOR_CONFIG}")
+        fi
+        export NXF_SYNTAX_PARSER=v1
+    fi
     NFCORE_DEBUG_LOG="${LOG_DIR}/nextflow_${PIPELINE}_${TIMESTAMP}_$$.log"
     echo "[LOG] Nextflow debug log: ${NFCORE_DEBUG_LOG}"
 }

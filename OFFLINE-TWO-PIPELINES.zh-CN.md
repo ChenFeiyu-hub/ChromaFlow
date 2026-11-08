@@ -1,6 +1,6 @@
 # ChIP/DAP 与 ATAC 两套 nf-core 离线包
 
-本页适用于 ChromaFlow 1.2.7。两套 bundle 独立保存，不能混合内部文件。
+本页适用于 ChromaFlow 1.2.8。两套 bundle 独立保存，不能混合内部文件。
 
 | 用途 | Pipeline | 版本 | Nextflow | 通用 bundle 目录示例 |
 |---|---|---|---|---|

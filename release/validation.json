@@ -1,0 +1,112 @@
+{
+  "version": "1.2.9",
+  "date": "2026-11-08",
+  "status": "LOCAL_AND_TARGET_SERVER_VALIDATED",
+  "python_linux": {
+    "tests": 193,
+    "failures": [],
+    "errors": [],
+    "skipped": [],
+    "seconds": 64.877,
+    "status": "PASS"
+  },
+  "r_regression": {
+    "status": "PASS",
+    "runtime": "R 4.4.1 on Windows",
+    "scripts": [
+      "test_tss_windows.R",
+      "test_annotation_plots.R",
+      "test_report_annotation_guard.R"
+    ],
+    "scope": "Actual R execution and R-to-Python comparison; complete Bioconductor reconstruction is a server gate"
+  },
+  "idr_postprocessing": {
+    "status": "PASS",
+    "real_bedtools": "2.30.0 from existing local Apptainer image",
+    "scope": "Four interval postprocessing tests with deterministic IDR outputs, not statistical IDR fitting"
+  },
+  "offline_startup": {
+    "chipseq-2.1.0": "PASS: local workflow and plugin startup; no new full data run",
+    "atacseq-2.1.2": "PASS: local workflow and plugin startup; no new full data run"
+  },
+  "source_audit": {
+    "status": "PASS",
+    "version": "1.2.9",
+    "python_files": 39,
+    "shell_files": 26,
+    "markdown_links": 58,
+    "bash_doc_blocks": 62,
+    "runtime_changes": [
+      "lib/batch.py",
+      "lib/help.sh",
+      "lib/steps/annotation_plots.R"
+    ],
+    "server_stage_identities_match": true,
+    "python_39_syntax": true,
+    "line_endings": "LF"
+  },
+  "tss_layout": {
+    "rendered_from_existing_profiles": 18,
+    "directly_viewed": [
+      "AT1G47655_col",
+      "AT3G52440_col",
+      "AT4G21040_col",
+      "AT1G29160_col"
+    ],
+    "status": "PASS: axis title separated from decimal tick labels; curve values unchanged"
+  },
+  "predecessor_evidence": "Six-patch 1.2.8 server acceptance: At_Dof-tss-idr-20261108-001006-706070",
+  "target_server_pending": [],
+  "unchanged_scientific_scope": [
+    "MACS calling/model parameters",
+    "Promoter and feature selection",
+    "Motif thresholds and candidate selection",
+    "GFF normalization engine and identity policy"
+  ],
+  "github_publication": "See this repository Git history for the publication revision.",
+  "target_server_acceptance": {
+    "date": "2026-11-08",
+    "status": "PASS",
+    "scope": "DAP-seq batch through candidates; upgrade/resume, failure isolation and actual report reconstruction",
+    "acceptance_exit": 0,
+    "batch_exit": 1,
+    "expected_batch_exit_reason": "One unchanged MACS3 model failure: 40 paired peaks, 100 required",
+    "python_regression": {
+      "tests": 193,
+      "failures": [],
+      "errors": [],
+      "skipped": [],
+      "seconds": 28.757,
+      "status": "PASS"
+    },
+    "r_regression_suites": 3,
+    "completed_downstream_stages_reused": 46,
+    "native_partial_group_tasks": {
+      "CACHED": 583,
+      "COMPLETED": 2,
+      "FAILED": 1
+    },
+    "analysis_status_counts": {
+      "insufficient_peaks": 4,
+      "complete": 14,
+      "model_failed": 1,
+      "no_peaks": 2
+    },
+    "reconstructed_annotation_analyses": 18,
+    "annotation_rows_checked": 27240,
+    "report_png_files": 72,
+    "tss_profiles_visually_reviewed": 18,
+    "report_repetition": "PASS: records and file metadata preserved",
+    "tss_independent_numerical_max_error": 1.3877787807814457e-16,
+    "blocking_findings": [],
+    "report": "docs/RELEASE_VALIDATION.md"
+  },
+  "publication_cleanup": {
+    "removed": [
+      ".gitignore",
+      "conf/nextflow.config"
+    ],
+    "runtime_unchanged_from_accepted_package": true,
+    "existing_test_archives": "Preserved with their original build-time metadata"
+  }
+}

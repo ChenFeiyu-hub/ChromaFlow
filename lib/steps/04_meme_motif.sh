@@ -40,7 +40,7 @@ fi
 resolve_peakset "${PIPELINE}" "${CHROMAFLOW_PEAKSET:-idr}"
 INPUT_PEAKS="${PEAKSET_FILE}"
 PEAK_SOURCE="${CHROMAFLOW_PEAKSET:-idr}"
-MOTIF_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/motif${PEAKSET_SUFFIX}")"
+MOTIF_OUT="$(step_outdir "$(downstream_dir "${PIPELINE}")/motif${PEAKSET_SUFFIX}")"
 mkdir -p "${MOTIF_OUT}"
 
 [[ -s "${INPUT_PEAKS}" ]] || { echo "[ERROR] Peak-set file is empty: ${INPUT_PEAKS}"; exit 1; }
@@ -148,7 +148,7 @@ meme-chip \
     -maxw 15 \
     -meme-nmotifs 10 \
     -meme-searchsize "${MEME_SEARCHSIZE}" \
-    -meme-p 8 \
+    -meme-p "${MEME_THREADS:-8}" \
     -centrimo-local \
     "${INPUT_FASTA}"
 

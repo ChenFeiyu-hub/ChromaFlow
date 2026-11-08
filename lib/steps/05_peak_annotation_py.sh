@@ -26,7 +26,7 @@ log_section "Step 05: Peak Annotation (${PIPELINE})"
 resolve_peakset "${PIPELINE}" "${CHROMAFLOW_PEAKSET:-idr}"
 INPUT_PEAKS="${PEAKSET_FILE}"; PEAK_SOURCE="${CHROMAFLOW_PEAKSET:-idr}"
 [[ -s "${INPUT_PEAKS}" ]] || die "Peak set is missing or empty: ${INPUT_PEAKS}"
-ANNO_OUT="$(step_outdir "${RESULTS_DIR}/downstream/${PIPELINE}/annotation${PEAKSET_SUFFIX}")"
+ANNO_OUT="$(step_outdir "$(downstream_dir "${PIPELINE}")/annotation${PEAKSET_SUFFIX}")"
 mkdir -p "${ANNO_OUT}"
 
 echo "  Pipeline:      ${PIPELINE}"

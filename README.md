@@ -1,14 +1,33 @@
-# ChromaFlow 1.2.7
+# ChromaFlow 1.2.9
 
 [中文指南](README.zh-CN.md) · [Offline deployment](docs/OFFLINE.md) · [Downstream commands](docs/DOWNSTREAM.md) · [Motif selection and tracks](docs/SELECTION.md) · [Release notes](CHANGELOG.md)
 
 ChromaFlow wraps nf-core/chipseq 2.1.0 (ChIP-seq and DAP-seq) and nf-core/atacseq 2.1.2, then provides IDR, motif discovery, peak annotation, candidate-gene integration, signal plots, gene tracks and GO exports. Source code, project configuration and analysis outputs live separately.
 
-Version 1.2.7 shares motif filters between candidates and lookup, passes verified
-selections to tracks, fixes CentriMo local/central labels, and sizes dense gene/motif
-tracks automatically. Exact gene IDs and the 1.2.6 annotation policy are preserved.
-See [selection and filtering commands](docs/SELECTION.md) and the
-[downstream guide](docs/DOWNSTREAM.md).
+Version 1.2.9 consolidates the tested `chromaflow batch init|plan|run|status|reports` workflow for multiple DAP-seq
+TFs sharing a reference. Native nf-core work is grouped, downstream outputs are
+isolated by analysis, and execution stops at candidates. Environment checks,
+terminal logs, verified resume and status summaries are built in. Read the
+[batch guide](docs/BATCH.md) and use the [batch config](templates/batch.config)
+with an explicit [sample table](templates/samples_batch.tsv).
+
+The existing exact-ID, promoter-audit and motif-selection behavior is preserved.
+This repository contains the accepted 1.2.9 source. All six 1.2.8 fixes are
+included; a new installation does not need separate hotfix archives or an old
+installation directory. See the [completed release validation](docs/RELEASE_VALIDATION.md)
+for the tested scope, server results and retained dataset limitations.
+
+The consolidated fixes cover complete FIMO zero-hit tables, nonstandard read
+lengths with measured effective genome sizes, per-analysis MACS failure isolation,
+stable resume identities, strict report reconstruction, reference-bound TSS
+windows and explicit non-IDR metadata. TSS axis spacing is improved without
+changing curve values. Completed results keep their original producer version.
+
+See [release acceptance and upgrade](docs/RELEASE_ACCEPTANCE.md) for the single
+server test/feedback entry point. The release records the compatible scientific
+stage identities of the validated predecessor. Inputs, environments, filters and
+outputs are still checked normally; later runtime edits disable that mapping.
+Historical hotfix guides are retained as records, not installation prerequisites.
 
 ## Install the software
 
@@ -27,15 +46,14 @@ chromaflow version
 
 Record `git -C "$CHROMAFLOW_HOME" rev-parse HEAD` to identify the exact revision.
 For an offline server, transfer a checked-out copy or an available release package.
-If you already have the versioned ChromaFlow archive and its checksum, install it with:
+If you already have the locally transferred versioned ChromaFlow archive, install it with:
 
 ```bash
 cd ~/nfcore-upload   # directory containing the transferred release
-sha256sum -c ChromaFlow-1.2.7.tar.gz.sha256
-mkdir -p "$HOME/biosoft/ChromaFlow-1.2.7"
-tar -xzf ChromaFlow-1.2.7.tar.gz \
-  -C "$HOME/biosoft/ChromaFlow-1.2.7" --strip-components=1
-export CHROMAFLOW_HOME="$HOME/biosoft/ChromaFlow-1.2.7"
+mkdir -p "$HOME/biosoft/ChromaFlow-1.2.9"
+tar -xzf ChromaFlow-1.2.9.tar.gz \
+  -C "$HOME/biosoft/ChromaFlow-1.2.9" --strip-components=1
+export CHROMAFLOW_HOME="$HOME/biosoft/ChromaFlow-1.2.9"
 export PATH="$CHROMAFLOW_HOME/bin:$PATH"
 chromaflow version
 ```
@@ -84,7 +102,7 @@ chromaflow offline pack --bundle "$HOME/nfcore-offline/chipseq-2.1.0" --archive 
 chromaflow offline pack --bundle "$HOME/nfcore-offline/atacseq-2.1.2" --archive "$HOME/atacseq-2.1.2.tar"
 ```
 
-Transfer the two archives, their `.sha256` files and the ChromaFlow release. Follow [the deployment guide](docs/OFFLINE.md) for shared `/opt` installation, target-side validation, permissions, project configuration, troubleshooting and version upgrades. DAP-seq shares the chipseq bundle. Existing valid bundles for these versions can be reused after upgrading ChromaFlow.
+Transfer the two bundle archives and the ChromaFlow release. Follow [the deployment guide](docs/OFFLINE.md) for shared `/opt` installation, target-side validation, permissions, project configuration, troubleshooting and version upgrades. DAP-seq shares the chipseq bundle. Existing valid bundles for these versions can be reused after upgrading ChromaFlow. Local software updates do not require separate transfer checksum files; downloaded bundle integrity checks remain available in `offline check`.
 
 ## Start a project
 
@@ -247,7 +265,7 @@ Software-generated messages, help and plot labels are English. User paths, gene 
 ```bash
 Rscript "$CHROMAFLOW_HOME/lib/steps/plot_tss.R" \
   results/downstream/chipseq/annotation/peak_annotation_full.tsv \
-  results/downstream/chipseq/annotation/tss_plot_v1.2.7
+  results/downstream/chipseq/annotation/tss_plot_v1.2.9
 ```
 
 ## Command reference
@@ -255,6 +273,7 @@ Rscript "$CHROMAFLOW_HOME/lib/steps/plot_tss.R" \
 | Command | Purpose |
 |---|---|
 | `setup`, `init`, `doctor` | Environments, project creation, checks |
+| `batch init/plan/run/status/reports` | DAP-seq batches through candidates; separate report refresh |
 | `offline prepare/check/pack` | Build, verify and package local nf-core bundles |
 | `samplesheet`, `reference`, `normalize-gff`, `run` | Inputs, reference preparation, nf-core |
 | `idr`, `motif`, `annotate`, `annotate-py` | Reproducibility, motifs, annotation |
@@ -266,10 +285,10 @@ Use `chromaflow help <command>`, `chromaflow help config`, `chromaflow help samp
 ## Validation
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 tests/run_suite.py --json /tmp/chromaflow-regression.json
 ```
 
-The v1.2.7 validation run passed 113 tests, covering offline bundles, CLI execution,
+The v1.2.9 validation includes upgrade compatibility, batch orchestration and recovery, offline bundles, CLI execution,
 logs, peakset routing, setup plans, GFF preservation, TxDb identity aliases,
 interval-score recovery, shared motif filters, CentriMo labels and selection
 provenance. IDR postprocessing integration tests use real bedtools with deterministic
@@ -277,3 +296,9 @@ IDR output; they skip when bedtools is unavailable. Linux/Bash-specific checks a
 skip on unsupported platforms. Real pyGenomeTracks rendering was checked separately
 with synthetic neighboring genes and dense transcript models. These checks do not
 replace a complete run on your own samples.
+
+The release test runner reports skipped tests as REVIEW. Supply real bedtools or
+set `CHROMAFLOW_TEST_BEDTOOLS_IMAGE` to an existing local image with Apptainer
+available. It never downloads a test image. Actual R regression scripts and the
+server upgrade/resume/report checks are described in [release acceptance](docs/RELEASE_ACCEPTANCE.md).
+Batch validation also checks the pinned Nextflow configuration and native sample-table validator. Full public-data execution must be verified on the target server; see [BATCH.md](docs/BATCH.md#validation-boundary).

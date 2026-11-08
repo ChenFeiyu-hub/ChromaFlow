@@ -36,6 +36,12 @@ source "${LIB}/common.sh"
 # shellcheck disable=SC1091
 source "${LIB}/help.sh"
 
+# Batch owns its subcommand parser; do not consume its options as global ones.
+if [[ "${1:-}" == batch ]]; then
+    shift
+    exec python3 "${LIB}/batch.py" "$@"
+fi
+
 usage() {
     help_main
     exit "${1:-0}"

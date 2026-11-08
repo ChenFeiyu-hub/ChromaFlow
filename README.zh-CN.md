@@ -1,10 +1,35 @@
-# ChromaFlow 1.2.7 使用指南
+# ChromaFlow 1.2.9 使用指南
+
+1.2.9 整合 `chromaflow batch init|plan|run|status|reports` 及已验证修复：一个共享 config 和样本 TSV，
+按兼容读长/测序类型合并执行 nf-core，再按蛋白隔离 annotate → motif → candidates。
+本轮批量功能止于 candidates，不自动执行 IDR、lookup 或 tracks。
+提供环境预检查、英文终端日志、校验式续跑及状态汇总。
+详见 [批量流程指南](docs/BATCH.md)、[配置模板](templates/batch.config) 和
+[样本表示例](templates/samples_batch.tsv)。本仓库提供已完成验收的 1.2.9 源码；
+测试范围、服务器验收结果与保留的数据限制见[最终验收记录](docs/RELEASE_VALIDATION.md)。
+
+完整包已包含六次 1.2.8 修复，新安装不需要逐个叠加补丁，也不需要旧安装目录。
+覆盖 FIMO 零命中格式、非标准读长、MACS 失败隔离、稳定续跑、报告重建核验、
+真实参考边界下的 TSS 曲线及非 IDR 字段纠正。本版另调整 TSS 纵轴间距。
+已完成结果保留其原生产版本，不因升级而改称新版本重新计算。
+
+统一升级、测试与反馈入口见[发布验收指南](docs/RELEASE_ACCEPTANCE.md)。
+完整包记录了经过验证的科学阶段兼容关系；输入、环境、筛选参数及输出仍执行原有检查。
+后续自行修改运行代码会禁用该兼容关系。旧补丁指南保留为历史记录，不再作为新安装前提。
 
 [English README](README.md) · [离线部署完整命令](docs/OFFLINE.md) · [下游分析完整命令](docs/DOWNSTREAM.md) · [统一筛选与绘图](docs/SELECTION.md) · [版本说明](CHANGELOG.md)
 
 ChromaFlow 支持 ChIP-seq、DAP-seq 与 ATAC-seq。原始测序流程分别使用 nf-core/chipseq 2.1.0 和 nf-core/atacseq 2.1.2；软件自有下游功能包括 IDR、motif、ChIPseeker 注释、候选基因整合、信号图、基因轨道与 GO 输入导出。
 
-## 1.2.7 的主要变化
+## 1.2.9 的批量功能
+
+- 新增 `batch init/plan/run/status`，批量流程默认止于 candidates。
+- 明确指定样本、技术测序 run、生物学重复和对照；严格校验 PE 配对和 ID。
+- 共享参考、按读长估算有效基因组大小、合并兼容的 nf-core 执行；下游按分析单元隔离。
+- 自动切换配置的 Conda 环境、限制本地资源，保存各步日志、配置快照与结果来源。
+- 依据输入和输出校验结果续跑；失败与未评估的候选数为 NA，避免误作阴性结果。
+
+## 1.2.7 保留的功能
 
 - candidates 与 lookup 共用 `--motif`、`--pval`、`--qval`、`--motif-evalue`、`--centrimo-evalue`，先筛选所有 peak 的证据，再选每个基因的最佳 peak。
 - 自动生成 `selected_genes.txt`、`selected_evidence.tsv` 和 `selection.json`；`tracks --selection DIR` 直接使用同一筛选结果，校验输入版本和 peak 分支。
@@ -50,15 +75,14 @@ git -C "$CHROMAFLOW_HOME" rev-parse HEAD
 
 记录最后输出的提交号便于复现。内网服务器可接收这份完整源码目录，或使用已有的软件发行包。
 等待当前任务结束后再切换软件；升级到独立目录，避免覆盖正在执行的代码。
-如果已拿到版本化的压缩包和校验文件，可用以下方式安装：
+如果已拿到本地传输的版本化压缩包，可用以下方式安装：
 
 ```bash
 cd ~/nfcore-upload
-sha256sum -c ChromaFlow-1.2.7.tar.gz.sha256
-mkdir -p "$HOME/biosoft/ChromaFlow-1.2.7"
-tar -xzf ChromaFlow-1.2.7.tar.gz \
-  -C "$HOME/biosoft/ChromaFlow-1.2.7" --strip-components=1
-export CHROMAFLOW_HOME="$HOME/biosoft/ChromaFlow-1.2.7"
+mkdir -p "$HOME/biosoft/ChromaFlow-1.2.9"
+tar -xzf ChromaFlow-1.2.9.tar.gz \
+  -C "$HOME/biosoft/ChromaFlow-1.2.9" --strip-components=1
+export CHROMAFLOW_HOME="$HOME/biosoft/ChromaFlow-1.2.9"
 export PATH="$CHROMAFLOW_HOME/bin:$PATH"
 chromaflow version
 ```
@@ -113,7 +137,7 @@ for BUNDLE in chipseq-2.1.0 atacseq-2.1.2; do
 done
 ```
 
-不用另行手动执行 nf-core 下载、Nextflow 初始化、插件安装。将 tar 和对应 `.sha256` 上传到服务器，校验后分别解压到 `/opt/chromaflow/bundles/`。多账号共享只读软件包，每个账号的项目、work、缓存与日志各自存放。完整的上传后命令、权限、版本管理和故障处理见 [OFFLINE.md](docs/OFFLINE.md)。
+不用另行手动执行 nf-core 下载、Nextflow 初始化、插件安装。将 tar 上传到服务器，分别解压到 `/opt/chromaflow/bundles/`，再由 `offline check` 检查包的内容与运行环境。软件本地交付不要求额外的手动 SHA256 步骤。多账号共享只读软件包，每个账号的项目、work、缓存与日志各自存放。完整命令见 [OFFLINE.md](docs/OFFLINE.md)。
 
 WSL 中 Windows 的 `D:\biosoft` 对应 `/mnt/d/biosoft`；推荐在 Linux 的 `$HOME/nfcore-offline` 生成 bundle。制包端仍须能访问 GitHub 和容器仓库。服务器无网络不影响上传完成且经过验证的本地 bundle 运行。
 
@@ -255,7 +279,7 @@ CentriMo 区分 local/central/unknown 和“通过阈值、超过阈值、未报
 conda activate ChromaFlow_R
 Rscript "$CHROMAFLOW_HOME/lib/steps/plot_tss.R" \
   results/downstream/chipseq/annotation/peak_annotation_full.tsv \
-  results/downstream/chipseq/annotation/tss_plot_v1.2.7
+  results/downstream/chipseq/annotation/tss_plot_v1.2.9
 ```
 
 重绘命令写入新子目录，可与旧图比较。它使用 R 版表中的 `distanceToTSS` 列。当前保留经验证的 1.2.3 GFF 规范化实现和 ID/Name 映射验收逻辑，不增加衣藻专用 ID 截断规则。
@@ -265,15 +289,20 @@ Rscript "$CHROMAFLOW_HOME/lib/steps/plot_tss.R" \
 在软件仓库根目录运行：
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 tests/run_suite.py --json /tmp/chromaflow-regression.json
 ```
 
-1.2.7 本地验收通过 113 项测试，覆盖离线包、命令日志、分支隔离、GFF/TxDb、真实 bedtools
+1.2.9 本地验收覆盖升级兼容、批量结果隔离/续跑、离线包、命令日志、分支隔离、GFF/TxDb、真实 bedtools
 后处理、统一 motif 筛选、CentriMo 标签及 selection 来源检查；缺少 bedtools 或 Linux/Bash 时，
-相关测试会标为跳过。另用真实 pyGenomeTracks 验证了正负链、邻近 peak 和密集转录本绘图。
+相关测试会标为跳过，发布测试入口将其记为 REVIEW。可指定已有本地 bedtools 容器，测试不下载镜像。
+既往另用真实 pyGenomeTracks 验证了正负链、邻近 peak 和密集转录本绘图。
 这些检查不能代替用户自己的数据验收。程序终端输出、帮助及图中文字保持英文。
 
 - [离线部署与共享 /opt](docs/OFFLINE.md)：下载、打包、上传、权限与版本管理。
 - [下游流程说明](docs/DOWNSTREAM.md)：IDR、注释、启动子核验、signal、GO、spacing。
 - [GFF 规范化与 TxDb 验收](GFF_NORMALIZATION.md)：通用记录保持与显式身份映射规则。
 - [软件架构](ARCHITECTURE.md)、[版本记录](CHANGELOG.md)、`chromaflow help <command>`。
+
+批量功能还用固定版本 Nextflow 检查资源配置，并用 nf-core 原生校验器验证样本表。
+实际 R 回归、完整包升级后的真实服务器续跑和报告重复生成均由
+[统一发布验收入口](docs/RELEASE_ACCEPTANCE.md)组织；通过后仍需人工检查报告图形。

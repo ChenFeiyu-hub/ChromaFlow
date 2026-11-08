@@ -6,6 +6,7 @@ from annotation_policy import norm_feat, target_features as parse_features, loca
 from promoter_audit import read_genes, read_query, audit
 from fimo_tracks import read_sizes
 from motif_selection import Evidence
+from peak_metadata import lookup_idr_values
 anno_f, query_f, outdir, feat_s, pmax_s, minsig_s, level = sys.argv[1:8]
 up, down, maxtss, confirmed, peak_file, chrom_sizes = sys.argv[8:14]
 up, down, maxtss = int(up), int(down), int(maxtss)
@@ -23,6 +24,9 @@ query = read_query(query_f)
 
 # 05 注释 → peaks；建 by_chr(映射FIMO) 与 gene→peaks
 rows=list(csv.DictReader(open(anno_f), delimiter="\t"))
+idr_values = lookup_idr_values(rows, os.environ.get('PEAKSET_KIND', 'unknown'), peak_file)
+if os.environ.get('PEAKSET_KIND', 'unknown') != 'idr':
+    print('[METADATA] globalIDR=NA: this input is not an explicitly selected IDR peak set.')
 peaks=[]; by_chr=collections.defaultdict(list)
 by_gene=collections.defaultdict(list)
 for i,r in enumerate(rows):
@@ -35,7 +39,7 @@ for i,r in enumerate(rows):
     rec={"chr":ch,"s":s,"e":e,"pid":r.get("peak_id") or f"peak_{i}",
          "gene":r.get("geneId") or "","feat":norm_feat(r.get("annotation","")),
          "dist":r.get("distanceToTSS",""),"sig":num(r.get("peak_score")),
-         "idr":r.get("peak_globalIDR","")}
+         "idr":idr_values[i]}
     peaks.append(rec); by_chr[ch].append(rec)
     if rec["gene"]:
         by_gene[rec["gene"]].append(rec)

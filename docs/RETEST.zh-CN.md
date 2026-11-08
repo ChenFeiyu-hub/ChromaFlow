@@ -1,4 +1,4 @@
-# 1.2.7：仅使用 chromaflow 命令的逐步验收
+# 1.2.8：仅使用 chromaflow 命令的逐步验收
 
 本指南使用通用示例路径；请替换为自己的项目。安装与离线运行步骤见
 [README](../README.zh-CN.md) 和 [离线指南](OFFLINE.md)。
@@ -13,7 +13,7 @@ cd "$HOME/projects/MyChIP"
 chromaflow doctor --type chipseq
 ```
 
-应确认当前版本为 1.2.7，且项目目录中只有一份实际使用的 `chromaflow.config`。
+应确认当前版本为 1.2.8，且项目目录中只有一份实际使用的 `chromaflow.config`。
 无需删除参考目录。显式配置路径优先于自动发现；保留 `.chromaflow` 的登记与实测结果。
 启动子窗口由 `PROMOTER_UP/DOWN` 控制，候选类别由 `TARGET_FEATURES` 控制，
 距离补救由 `TARGET_MAX_TSS_DIST` 控制。先确定这些参数，再做下游分析。

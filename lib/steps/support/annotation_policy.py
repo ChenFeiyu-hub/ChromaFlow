@@ -66,7 +66,8 @@ def check_policy(annotation, up, down):
         raise ValueError('Annotation changed after policy validation; rerun annotate')
 
 
-def validate_annotation(annotation, up, down):
+def prepared_annotation(annotation, up, down):
+    """Apply the existing feature policy in memory, without rewriting a file."""
     if min(up, down) < 0: raise ValueError('Promoter extents must be nonnegative')
     annotation = Path(annotation)
     with annotation.open(encoding='utf-8') as stream:
@@ -86,6 +87,12 @@ def validate_annotation(annotation, up, down):
         row['feature_class'] = feature
         counts[feature] = counts.get(feature, 0)+1
     if 'feature_class' not in fields: fields.append('feature_class')
+    return fields, rows, counts
+
+
+def validate_annotation(annotation, up, down):
+    annotation = Path(annotation)
+    fields, rows, counts = prepared_annotation(annotation, up, down)
     temporary = annotation.with_suffix(annotation.suffix+'.tmp')
     with temporary.open('w', encoding='utf-8', newline='') as stream:
         writer = csv.DictWriter(stream, fields, delimiter='\t', lineterminator='\n')
@@ -98,15 +105,56 @@ def validate_annotation(annotation, up, down):
     print('[POLICY] Promoter priority/window verified for', len(rows), 'peaks; feature classes:', counts)
 
 
+def compare_annotation(annotation, reconstructed, up, down):
+    """Compare the finished pipeline table with the reconstructed R table.
+
+    Normal annotate adds feature_class after R exits and may quote TSV cells.
+    Reproduce that same policy in memory, then compare parsed cells exactly.
+    Do not ignore IDs, coordinates, scores, feature classes or row order.
+    Neither input is edited, and numeric tolerances/ID normalization are absent.
+    """
+    fields, rows, _ = prepared_annotation(reconstructed, up, down)
+    with Path(annotation).open(encoding='utf-8') as stream:
+        reader = csv.DictReader(stream, delimiter='\t')
+        expected_fields, expected_rows = list(reader.fieldnames or []), list(reader)
+    if expected_fields != fields:
+        raise ValueError('Annotation column mismatch after feature_class derivation; '
+                         f'saved={expected_fields!r}; reconstructed={fields!r}')
+    if len(expected_rows) != len(rows):
+        raise ValueError(f'Annotation row count mismatch: saved={len(expected_rows)}, reconstructed={len(rows)}')
+    differences = []
+    for i, (old, new) in enumerate(zip(expected_rows, rows), 1):
+        if None in old or None in new or any(old.get(k) is None or new.get(k) is None for k in fields):
+            raise ValueError(f'Malformed annotation TSV row {i}')
+        for key in fields:
+            if old[key] != new[key]:
+                differences.append(f'row {i}, peak {old.get("peak_id", "?")!r}, column {key}: '
+                                   f'saved={old[key]!r}; reconstructed={new[key]!r}')
+                if len(differences) == 5:
+                    break
+        if len(differences) == 5:
+            break
+    if differences:
+        raise ValueError('Annotation content mismatch (first differences):\n' + '\n'.join(differences))
+    print(f'[VERIFIED] Reconstructed annotation matches all {len(rows)} rows and {len(fields)} columns '
+          'after the same feature_class policy; saved files unchanged')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('validate','check'))
+    parser.add_argument('mode', choices=('validate','check','compare'))
     parser.add_argument('annotation')
     parser.add_argument('--up', type=int, required=True)
     parser.add_argument('--down', type=int, required=True)
+    parser.add_argument('--reconstructed', help='Raw R annotation TSV, required for compare; read-only')
     args = parser.parse_args()
     try:
-        (validate_annotation if args.mode == 'validate' else check_policy)(args.annotation, args.up, args.down)
+        if args.mode == 'compare':
+            if not args.reconstructed:
+                parser.error('compare requires --reconstructed')
+            compare_annotation(args.annotation, args.reconstructed, args.up, args.down)
+        else:
+            (validate_annotation if args.mode == 'validate' else check_policy)(args.annotation, args.up, args.down)
     except (ValueError, OSError, KeyError) as exc: parser.exit(1, '[ERROR] '+str(exc)+'\n')
 
 

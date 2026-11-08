@@ -69,7 +69,7 @@ case "${PIPELINE}" in
 esac
 
 SAMPLESHEET="${SAMPLESHEET_DIR}/samplesheet_${PIPELINE}.csv"
-OUTDIR="${RESULTS_DIR}/${PIPELINE}"
+OUTDIR="${CF_BATCH_NFCORE_OUT:-${RESULTS_DIR}/${PIPELINE}}"
 
 open_log "02_run_nfcore_conda" "${PIPELINE}"
 
@@ -222,14 +222,17 @@ GSIZE_ARGS=()
 if [[ -n "${MACS_GSIZE}" ]]; then
     GSIZE_ARGS+=(--macs_gsize "${MACS_GSIZE}")
     echo "[  OK ] MACS_GSIZE: ${MACS_GSIZE} (Source: $(value_origin MACS_GSIZE)$(
-        m="$(derived_get MACS_GSIZE_METHOD 2>/dev/null || true)"; [[ -n "${m}" ]] && echo ", ${m}")）"
+        m="$(derived_get MACS_GSIZE_METHOD 2>/dev/null || true)"; [[ -n "${m}" ]] && echo ", ${m}"))"
+    # read_length only drives nf-core's fallback size estimator. Its schema
+    # excludes lengths such as 130 even when an explicit macs_gsize is supplied.
+    [[ -z "${READ_LENGTH}" ]] || echo "[INFO ] READ_LENGTH=${READ_LENGTH} retained in ChromaFlow; nf-core uses the supplied MACS_GSIZE"
 elif [[ -n "${READ_LENGTH}" ]]; then
+    GSIZE_ARGS+=(--read_length "${READ_LENGTH}")
     echo "[INFO ] MACS_GSIZE is unset; nf-core will estimate it using --read_length=${READ_LENGTH}"
 else
     die "Both MACS_GSIZE and READ_LENGTH are unset. Run chromaflow reference,
      or chromaflow samplesheet, or explicitly configure one of these values"
 fi
-if [[ -n "${READ_LENGTH}" ]]; then GSIZE_ARGS+=(--read_length "${READ_LENGTH}"); fi
 
 COMMON_ARGS=(
     --input "${SAMPLESHEET}"

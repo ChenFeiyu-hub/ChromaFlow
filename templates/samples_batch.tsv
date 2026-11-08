@@ -1,0 +1,5 @@
+analysis_id	sample_id	role	replicate	layout	fastq_1	fastq_2	control	control_replicate	target	condition	run_accession
+TF_A_col	TF_A_col	target	1	SE	TF_A_run1.fastq.gz		Input_col	1	TF_A	col	RUN_A1
+TF_A_col	TF_A_col	target	2	SE	TF_A_run2.fastq.gz		Input_col	1	TF_A	col	RUN_A2
+TF_B_col	TF_B_col	target	1	SE	TF_B_run1.fastq.gz		Input_col	1	TF_B	col	RUN_B1
+	Input_col	control	1	SE	Input_run1.fastq.gz					col	RUN_INPUT1

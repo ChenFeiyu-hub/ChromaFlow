@@ -65,7 +65,7 @@ PY''')
         result = self.cli('annotate')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         log = self.logs()[0].read_text()
-        for text in ('annotation-stdout', 'annotation-stderr', '[VERSION] 1.2.7', '[COMMAND]', 'exit_code=0'):
+        for text in ('annotation-stdout', 'annotation-stderr', '[VERSION] 1.2.9', '[COMMAND]', 'exit_code=0'):
             self.assertIn(text, log)
         self.assertFalse((self.down / 'signal').exists())
         self.assertFalse((self.down / 'motif').exists())
@@ -214,8 +214,8 @@ PY''')
     def test_lookup_without_motifs_retains_location_only_mode(self):
         self.idr_fixture()
         annotation=self.down/'annotation';annotation.mkdir()
-        (annotation/'peak_annotation_full.tsv').write_text('seqnames\tstart\tend\tpeak_id\tgeneId\tannotation\tdistanceToTSS\tpeak_score\n'
-                                                          'chr1\t101\t200\tidr\tGENE1\tPromoter\t-100\t5\n')
+        (annotation/'peak_annotation_full.tsv').write_text('seqnames\tstart\tend\tpeak_id\tgeneId\tannotation\tdistanceToTSS\tpeak_score\tpeak_globalIDR\n'
+                                                          'chr1\t101\t200\tidr\tGENE1\tPromoter\t-100\t5\t3\n')
         (annotation/'genes.bed').write_text('chr1\t100\t500\tGENE1\t0\t+\tGENE1\n')
         gene_list=self.project/'query.txt';gene_list.write_text('GENE1\n')
         r=self.cli('lookup','--gene-list',str(gene_list),'--yes')
@@ -226,8 +226,8 @@ PY''')
     def lookup_fixture(self):
         self.idr_fixture()
         annotation=self.down/'annotation'; annotation.mkdir()
-        (annotation/'peak_annotation_full.tsv').write_text('seqnames\tstart\tend\tpeak_id\tgeneId\tannotation\tdistanceToTSS\tpeak_score\n'
-            'chr1\t101\t200\tidr\tCre03.g146207_4532\tPromoter\t-100\t5\n')
+        (annotation/'peak_annotation_full.tsv').write_text('seqnames\tstart\tend\tpeak_id\tgeneId\tannotation\tdistanceToTSS\tpeak_score\tpeak_globalIDR\n'
+            'chr1\t101\t200\tidr\tCre03.g146207_4532\tPromoter\t-100\t5\t3\n')
         (annotation/'genes.bed').write_text('chr1\t200\t500\tCre03.g146207_4532\t0\t+\n'
                                           'chr1\t600\t900\tG.v6.1\t0\t+\n')
         query=self.project/'query.txt'; query.write_text('Cre03.g146207_4532\n4532\nCre03.g146207\nG\nG.v6.1\n')
@@ -265,11 +265,11 @@ PY''')
         self.idr_fixture()
         with self.config.open('a') as w: w.write('PROMOTER_DOWN=0\nTARGET_FEATURES="Promoter,5\' UTR,1st Exon"\n')
         annotation=self.down/'annotation'; annotation.mkdir()
-        (annotation/'peak_annotation_full.tsv').write_text('seqnames\tstart\tend\tpeak_id\tgeneId\tannotation\tdistanceToTSS\tpeak_score\n'
-            'chr1\t101\t200\tidr\tG1\tExon (T1/G1, exon 1 of 3)\t10\t5\n'
-            'chr1\t501\t600\tp2\tG2\tExon (T2/G2, exon 2 of 3)\t10\t8\n')
+        (annotation/'peak_annotation_full.tsv').write_text('seqnames\tstart\tend\tpeak_id\tgeneId\tannotation\tdistanceToTSS\tpeak_score\tpeak_globalIDR\n'
+            'chr1\t101\t200\tidr\tG1\tExon (T1/G1, exon 1 of 3)\t10\t5\t3\n'
+            'chr1\t501\t600\tp2\tG2\tExon (T2/G2, exon 2 of 3)\t10\t8\t4\n')
         (annotation/'genes.bed').write_text('chr1\t90\t400\tG1\t0\t+\nchr1\t490\t800\tG2\t0\t+\n')
-        (self.down/'idr/idr_peaks_threshold_0.01.bed').write_text('chr1\t100\t200\tidr\t5\t+\nchr1\t500\t600\tp2\t8\t+\n')
+        (self.down/'idr/idr_peaks_threshold_0.01.bed').write_text('chr1\t100\t200\tidr\t5\t+\t3\t1\nchr1\t500\t600\tp2\t8\t+\t4\t2\n')
         motif=self.down/'motif/meme-chip_output/fimo_out_1'; motif.mkdir(parents=True)
         (motif/'fimo.tsv').write_text('motif_id\tmotif_alt_id\tsequence_name\tstart\tstop\tstrand\tp-value\n'
             'M1\tM1\tchr1\t110\t118\t+\t0.00001\nM1\tM1\tchr1\t510\t518\t+\t0.00001\n')
@@ -304,7 +304,9 @@ PY''')
         query.write_text('Cre03.g146207_4532\nG.v6.1\n')
         anno=self.down/'annotation/peak_annotation_full.tsv'
         with anno.open('a') as w:
-            w.write('chr1\t301\t350\tp2\tCre03.g146207_4532\tPromoter\t-50\t2\n')
+            w.write('chr1\t301\t350\tp2\tCre03.g146207_4532\tPromoter\t-50\t2\t4\n')
+        with (self.down/'idr/idr_peaks_threshold_0.01.bed').open('a') as w:
+            w.write('chr1\t300\t350\tp2\t2\t+\t4\t1\n')
         motif=self.down/'motif/meme-chip_output/fimo_out_1';motif.mkdir(parents=True)
         (motif/'fimo.tsv').write_text('motif_id\tmotif_alt_id\tsequence_name\tstart\tstop\tstrand\tp-value\tq-value\n'
             'M1\tMEME-1\tchr1\t120\t128\t+\t0.00001\t0.01\n'

@@ -1,5 +1,124 @@
 # Changelog
 
+## v1.2.9 — consolidated batch release and acceptance (2026-11-08)
+
+- Complete target-server acceptance: 193 Python tests without skips, three R
+  suites, all 46 completed downstream stages reused, and 18 report sets checked
+  numerically and visually. Repeated report generation preserves all outputs.
+- Remove the obsolete root `.gitignore` and `conf/nextflow.config`; current
+  runtime configuration remains in project settings and the nf-core launcher.
+- Include all six validated 1.2.8 fixes in one complete installation. Preserve
+  reviewed scientific stage identities across a side-by-side upgrade, subject
+  to exact runtime matching and the existing input/environment/output checks.
+- Keep cached 1.2.8 candidate provenance unchanged; newly rendered reports and
+  newly computed results identify the new release. Retain the narrow historical
+  reporter-typo repair for saved 1.2.8 plans.
+- Separate three-decimal TSS tick labels from the axis title; profile values,
+  reference bounds, windows, gene/peak assignments and thresholds are unchanged.
+- Package one acceptance helper for Python/Linux and actual R regressions,
+  full-plan upgrade/resume checks, repeated report refresh and bounded feedback.
+  Report skipped tests and pending visual/server verification explicitly.
+- Consolidate English/Chinese installation and testing documentation. Deliver
+  full archives without separate local-transfer checksum files or extra hotfix
+  kits. Offline download integrity and normal cache validation are retained.
+- Keep the DAP batch endpoint at candidates and preserve the known biological/
+  data sufficiency statuses. Do not change MACS modeling or promote failed cases.
+
+## v1.2.8 TSS and IDR metadata hotfix (2026-11-07)
+
+- Use reference chromosome lengths for full-width TSS profiles; export retained,
+  zero-overlap and true-edge window audits with strand-correct peak counts.
+- Interpret globalIDR only for an explicit ChromaFlow IDR BED8 selection; use
+  NA for non-IDR/custom annotations and lookup, including legacy lookup input.
+- Repair verified old batch IDR labels with backups, strict output checks and
+  preserved dependency identities. Refresh candidate source provenance without
+  changing candidate evidence. Keep all biological filters and MACS settings.
+- Bundle updated server resume/report acceptance and feedback collection in one
+  local archive. No new environment, manual checksum or GitHub update is needed.
+
+## v1.2.8 report-table guard correction (2026-11-07)
+
+- Compare reconstructed annotations after the same Python feature_class policy
+  used by normal annotate; compare parsed TSV cells instead of intermediate R
+  text against the postprocessed table. Keep all scientific fields and row
+  order strict and report concrete differences without editing either input.
+- Add actual R-to-Python guard integration tests, including the former false
+  rejection and rejection of changed scientific evidence. Retain verified cache
+  compatibility through the existing four-patch chain.
+
+## v1.2.8 resume-reports hotfix (2026-11-07)
+
+- Exclude only the known ignored Open MPI loader warning from motif environment
+  identity. Verify historical signatures and outputs before migrating cached
+  results; keep downstream dependency identities stable and log rerun reasons.
+- Replace the optional ggupset dependency with bundled base R intersection
+  plots, and validate/export TSS profiles with explicit skipped/failed status.
+- Add `batch reports` for separately staged diagnostic figures. Require exact
+  reconstructed annotation equality and preserve scientific results/status.
+- Derive selection metadata from the installed CLI version. Repair the known
+  old label in verified batch results with a backup and updated cache metadata.
+- Provide a single local update archive and a separate, non-promoting AtDof1.7
+  MFOLD sensitivity helper. Do not change MACS defaults or biological filters.
+
+## v1.2.8 peak-isolation hotfix (2026-11-06)
+
+- Isolate the pinned batch MACS3 process with a scoped Nextflow error strategy;
+  validate a fresh task trace and required replicate/consensus files before
+  admitting each analysis to downstream processing. Keep other native failures fatal.
+- Report `model_failed`, `peak_calling_failed` and `nfcore_incomplete` separately.
+  Store partial groups as partial and retain a nonzero batch exit while any analysis
+  fails. Do not create empty peaks or change MACS thresholds/model parameters.
+- Preserve completed-stage cache eligibility across the checked hotfix chain.
+  Retry failed native tasks while retaining successful downstream reuse.
+- Add a final status-count summary and describe the fewer-than-ten-peak cutoff
+  accurately as ChromaFlow's small-input policy. Close subprocess output streams.
+- Deliver a single local installation archive and normal batch continuation
+  commands without separate checksum files or manual SHA256 steps.
+
+## v1.2.8 read-length hotfix (2026-11-06)
+
+- Send only `--macs_gsize` when effective genome size is already available, in
+  both the container and Conda launchers. Keep upstream `--read_length` fallback
+  when size is absent. This removes the unnecessary enum rejection of 130 bp
+  batches without changing the actual read length or the k-mer estimate.
+- Chain verified installation provenance with the FIMO zero-hit patch so the
+  same selected inputs remain eligible for resume, including candidates. Changes
+  to sample-group membership still invalidate that group's dependent stages.
+- Cover both launchers, ChIP/DAP and ATAC arguments, real-k batch metadata,
+  chained upgrade/resume and malformed/tampered patch records with regressions.
+- Add installation and full 21-target Dof continuation commands to the guide.
+
+## v1.2.8 FIMO zero-hit hotfix (2026-11-06)
+
+- Accept FIMO 5.5.7's complete three-comment, headerless zero-hit TSV in the
+  shared candidates/lookup reader and direct motif tracks export. Retain motif
+  identity and a zero hit count; leave input results and thresholds unchanged.
+- Continue rejecting blank, incomplete or malformed tables and footer-only TSVs
+  whose companion GFF contains hits. Record a checked GFF in selection provenance.
+- A checked hotfix installer records before/after runtime hashes. Only this
+  reader-only update preserves reference/nf-core/annotation/motif cache identities;
+  candidate integration is recomputed, and all normal output checks remain active.
+- Add zero-hit integration and upgrade/resume regression tests. This targeted
+  hotfix does not address the separate 130 bp nf-core read-length compatibility issue.
+
+## v1.2.8 — manifest-driven DAP-seq batches
+
+- Add batch init, plan, run, status, exact analysis selection and staged execution
+  through candidates. Keep one user config and TSV with explicit controls,
+  technical runs, biological replicates and SE/PE layout.
+- Share reference normalization, per-k effective size and compatible nf-core
+  executions. Reuse saved BWA indexes; bind downstream inputs by exact output
+  manifests. Handle singleton narrowPeak output without claiming reproducibility.
+- Isolate annotation, motif discovery and candidate results per analysis; retain
+  the existing promoter/ID rules. Scope motif names in cross-analysis summaries.
+- Switch environments explicitly, record executable paths, constrain local
+  executor resources and MEME threads, and save English terminal logs.
+- Resume only matching stages with verified outputs. Continue independent units
+  after failure; keep NA distinct from a successful zero-candidate result.
+- Add synthetic workflow/candidate integration and recovery regression coverage.
+  Package a separate curated Dof test manifest; no dataset IDs enter core code.
+
+
 ## v1.2.7 — shared motif selection and auditable tracks
 
 Documentation review (2026-09-28): expand both READMEs with repository installation,

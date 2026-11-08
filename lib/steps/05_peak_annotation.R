@@ -30,6 +30,13 @@ kegg_org   <- if (length(a) >= 9) a[9] else ""
 plot_flag  <- if (length(a) >= 10) tolower(a[10]) else "true"
 if (!plot_flag %in% c("true", "false")) stop("MAKE_PLOTS must be true or false")
 make_plots <- plot_flag == "true"
+# An optional existing table requests report-only rendering into a separate
+# directory. Exact table equality is required before producing any reports.
+report_table <- if (length(a) >= 11) a[11] else ""
+chrom_sizes <- if (length(a) >= 12) a[12] else ""
+peak_kind <- if (length(a) >= 13) a[13] else "unknown"
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1])
+source(file.path(dirname(script_file), "tss_windows.R"))
 
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 say <- function(...) cat(sprintf(...), "\n")
@@ -70,8 +77,9 @@ say("  Annotated %d peaks", nrow(df))
 # peak id 列（readPeakFile 把 BED 第4列存为 V4）
 df$peak_id <- if ("V4" %in% names(df)) as.character(df$V4) else paste0("peak_", seq_len(nrow(df)))
 df$peak_score <- if ("V5" %in% names(df)) suppressWarnings(as.numeric(df$V5)) else NA_real_
-# globalIDR（03 输出的第7列，若存在）— 供反查报告可重复性
-df$peak_globalIDR <- if ("V7" %in% names(df)) suppressWarnings(as.numeric(df$V7)) else NA_real_
+# Column 7 is globalIDR only for the explicitly selected ChromaFlow IDR BED8.
+# narrowPeak column 7 is MACS signalValue; custom files have unknown semantics.
+df$peak_globalIDR <- peak_idr_values(df, peak_kind)
 
 # ── 关键区分：annotation 里的基因 ≠ geneId ──────────────────────────────
 # ChIPseeker 的两列回答的是两个不同问题：
@@ -109,8 +117,24 @@ if (n_mis > 0) {
 }
 
 # 完整注释表
-write.table(df, file.path(outdir, "peak_annotation_full.tsv"),
-            sep = "\t", quote = FALSE, row.names = FALSE)
+verify_report_annotation <- function(df, saved, scratch_dir, up, down, policy_script, python = "python3") {
+    reconstructed <- tempfile("reconstructed-annotation-", tmpdir = scratch_dir, fileext = ".tsv")
+    on.exit(unlink(reconstructed), add = TRUE)
+    write.table(df, reconstructed, sep = "\t", quote = FALSE, row.names = FALSE)
+    status <- system2(python, c(shQuote(policy_script), "compare", shQuote(saved),
+                     "--reconstructed", shQuote(reconstructed), "--up", as.character(up),
+                     "--down", as.character(down)))
+    if (status != 0L) stop("Report refresh refused: annotation comparison failed; see the detailed differences above")
+    invisible(TRUE)
+}
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1])
+if (nzchar(report_table)) {
+    verify_report_annotation(df, report_table, outdir, prom_up, prom_down,
+                             file.path(dirname(script_file), "support", "annotation_policy.py"))
+} else {
+    write.table(df, file.path(outdir, "peak_annotation_full.tsv"),
+                sep = "\t", quote = FALSE, row.names = FALSE)
+}
 
 # ── 基因组分布统计（细分类别，文献饼图口径）──
 df$feature <- simplify_cat(df$annotation)
@@ -121,35 +145,29 @@ write.table(tab, file.path(outdir, "genomic_distribution.tsv"),
 say("  Distribution: %s", paste(sprintf("%s=%d(%.1f%%)", tab$feature, tab$peaks, tab$pct), collapse = "  "))
 
 # ── 图: 饼图 / 距 TSS(条形) / upset ──
-optional_png <- function(name, width, height, draw) {
-    if (!make_plots) return(invisible(NULL))
-    opened <- FALSE
-    tryCatch({
-        png(file.path(outdir, name), width, height, res = 130)
-        opened <- TRUE
-        value <- force(draw)
-        if (inherits(value, "ggplot")) print(value)
-    }, error = function(e) warning(sprintf("Optional plot %s failed: %s", name, conditionMessage(e)), call. = FALSE),
-    finally = { if (opened) dev.off() })
-}
-optional_png("anno_pie.png", 1000, 800, plotAnnoPie(anno))
-script_file <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1])
 source(file.path(dirname(script_file), "plot_tss.R"))
+source(file.path(dirname(script_file), "annotation_plots.R"))
+report <- new_plot_report(outdir)
 if (make_plots) {
-    plot_tss_distance(df$distanceToTSS, outdir)
+    report$attempt("anno_pie.png", plotAnnoPie(anno), 1000, 800)
+    report$attempt("dist_to_tss.png", {
+        if (!any(is.finite(df$distanceToTSS))) skip_plot("No finite TSS distances")
+        plot_tss_distance(df$distanceToTSS, outdir)
+    })
+    report$attempt("anno_upset.png", plot_annotation_intersections(anno@detailGenomicAnnotation, outdir), 1400, 800)
+    report$attempt("tss_avgprof.png", {
+        prom <- ChIPseeker::getPromoters(TxDb = txdb, upstream = 3000, downstream = 3000)
+        tm <- reference_tss_matrix(peak, prom, chrom_sizes, outdir)
+        plot_tss_profile(tm, outdir)
+    }, 1200, 600)
 } else {
     say("  MAKE_PLOTS=false: annotation plots are disabled; tables and audits remain enabled")
 }
-optional_png("anno_upset.png", 1200, 700, upsetplot(anno))
-
-# ── 折线形 metaplot: peak 在 TSS 附近的密度曲线（R 原生, 近似文献折线图）──
-optional_png("tss_avgprof.png", 1100, 550, {
-    prom <- suppressWarnings(ChIPseeker::getPromoters(TxDb = txdb, upstream = 3000, downstream = 3000))
-    tm <- suppressWarnings(ChIPseeker::getTagMatrix(peak, windows = prom))
-    print(ChIPseeker::plotAvgProf(tm, xlim = c(-3000, 3000),
-          xlab = "Distance to TSS (bp)", ylab = "Peak frequency"))
-    invisible(NULL)
-})
+plot_status <- report$finish()
+if (nzchar(report_table)) {
+    say("[REPORT] Report-only rendering completed; scientific tables were not rewritten")
+    quit(status = if (any(plot_status$status == "failed")) 1L else 0L)
+}
 
 # ── genes.bed（BED6, 供 06/07 复用）──
 g <- genes(txdb)
